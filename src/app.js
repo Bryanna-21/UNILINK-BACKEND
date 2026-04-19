@@ -11,3 +11,5 @@ app.get("/", (req, res) => {
 });
 
 module.exports = app;
+const postRoutes = require("./routes/postRoutes");
+app.use("/api/posts", postRoutes);
