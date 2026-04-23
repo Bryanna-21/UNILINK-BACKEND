@@ -1,12 +1,9 @@
-const express = require("express");
-const router = express.Router();
+const router = require("express").Router();
+const ctrl = require("../controllers/post.controller");
+const auth = require("../middleware/auth.middleware");
 
-const {
-  createPost,
-  getPosts
-} = require("../controllers/postController");
-
-router.post("/", createPost);
-router.get("/", getPosts);
+router.post("/create", auth, ctrl.createPost);
+router.get("/feed", auth, ctrl.getFeed);
+router.post("/like/:id", auth, ctrl.likePost);
 
 module.exports = router;
