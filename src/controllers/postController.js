@@ -28,3 +28,15 @@ exports.likePost = async (req, res) => {
 
   res.json(post);
 };
+exports.createPost = async (req, res) => {
+  const { content, mediaUrl } = req.body;
+
+  const post = await Post.create({
+    userId: req.user.id,
+    universityId: req.user.universityId,
+    content,
+    mediaUrl
+  });
+
+  res.json(post);
+};
