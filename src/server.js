@@ -8,7 +8,8 @@ if (!process.env.MONGO_URI) {
   process.exit(1);
 }
 if (!process.env.JWT_SECRET) {
-  console.warn("⚠ Warning: JWT_SECRET not set, using default value");
+  console.error("✗ Error: JWT_SECRET environment variable is not set");
+  process.exit(1);
 }
 
 // MongoDB Connection
@@ -24,7 +25,7 @@ mongoose.connect(process.env.MONGO_URI, {
   })
   .catch(err => {
     console.error("✗ MongoDB Connection Error:", err.message);
-    console.error("Attempting to continue without database...");
+    process.exit(1);
   });
 
 // MongoDB connection event handlers
