@@ -1,142 +1,143 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const jwt = require('jsonwebtoken');
-const bcryptjs = require('bcryptjs');
+const jwt = require("jsonwebtoken");
+const bcryptjs = require("bcryptjs");
+const User = require("../models/User");
 
-// Mock user storage for now
-const users = new Map();
-let userIdCounter = 1;
+const VALID_ROLES = ["student", "lecturer", "admin"];
 
-// Helper function to generate JWT token
-const generateToken = (userId) => {
+// Generates a JWT carrying every field the rest of the app relies on.
+// Every downstream consumer (auth.middleware.js, post.controller.js,
+// emergency.controller.js) reads req.user.id / req.user.role /
+// req.user.universityId, so all three must be signed into the token.
+const generateToken = (user) => {
   return jwt.sign(
-    { id: userId },
-    process.env.JWT_SECRET || 'default_secret_key',
-    { expiresIn: '24h' }
+    {
+      id: user._id,
+      role: user.role,
+      universityId: user.universityId,
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: "24h" }
   );
 };
 
 // Register route
-router.post('/register', async (req, res) => {
+router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, confirmPassword } = req.body;
+    const { name, email, password, confirmPassword, universityId, role } = req.body;
 
-    // Validation
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Please provide all required fields'
+        status: "error",
+        message: "Please provide all required fields",
       });
     }
 
     if (password !== confirmPassword) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Passwords do not match'
+        status: "error",
+        message: "Passwords do not match",
       });
     }
 
     if (password.length < 6) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Password must be at least 6 characters long'
+        status: "error",
+        message: "Password must be at least 6 characters long",
       });
     }
 
-    // Check if user already exists
-    const existingUser = Array.from(users.values()).find(u => u.email === email);
+    const requestedRole = role && VALID_ROLES.includes(role) ? role : "student";
+
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
-        status: 'error',
-        message: 'User with this email already exists'
+        status: "error",
+        message: "User with this email already exists",
       });
     }
 
-    // Hash password
     const hashedPassword = await bcryptjs.hash(password, 10);
 
-    const userId = userIdCounter.toString();
-    userIdCounter++;
-
-    const newUser = {
-      id: userId,
+    const newUser = await User.create({
       name,
       email,
       password: hashedPassword,
-      createdAt: new Date().toISOString()
-    };
+      universityId,
+      role: requestedRole,
+    });
 
-    users.set(userId, newUser);
-
-    const token = generateToken(userId);
+    const token = generateToken(newUser);
 
     res.status(201).json({
-      status: 'success',
-      message: 'User registered successfully',
+      status: "success",
+      message: "User registered successfully",
       token,
       user: {
-        id: newUser.id,
+        id: newUser._id,
         name: newUser.name,
-        email: newUser.email
-      }
+        email: newUser.email,
+        role: newUser.role,
+        universityId: newUser.universityId,
+      },
     });
   } catch (error) {
     res.status(500).json({
-      status: 'error',
-      message: 'Error registering user: ' + error.message
+      status: "error",
+      message: "Error registering user: " + error.message,
     });
   }
 });
 
 // Login route
-router.post('/login', async (req, res) => {
+router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Validation
     if (!email || !password) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Please provide email and password'
+        status: "error",
+        message: "Please provide email and password",
       });
     }
 
-    // Find user by email
-    const user = Array.from(users.values()).find(u => u.email === email);
+    const user = await User.findOne({ email });
 
     if (!user) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Invalid email or password'
+        status: "error",
+        message: "Invalid email or password",
       });
     }
 
-    // Compare passwords
     const isPasswordValid = await bcryptjs.compare(password, user.password);
 
     if (!isPasswordValid) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Invalid email or password'
+        status: "error",
+        message: "Invalid email or password",
       });
     }
 
-    const token = generateToken(user.id);
+    const token = generateToken(user);
 
     res.status(200).json({
-      status: 'success',
-      message: 'Login successful',
+      status: "success",
+      message: "Login successful",
       token,
       user: {
-        id: user.id,
+        id: user._id,
         name: user.name,
-        email: user.email
-      }
+        email: user.email,
+        role: user.role,
+        universityId: user.universityId,
+      },
     });
   } catch (error) {
     res.status(500).json({
-      status: 'error',
-      message: 'Error logging in: ' + error.message
+      status: "error",
+      message: "Error logging in: " + error.message,
     });
   }
 });
