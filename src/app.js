@@ -3,6 +3,7 @@ const cors = require("cors");
 
 const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
+const aiRoutes = require("./routes/ai.routes");
 const postRoutes = require("./routes/post.routes");
 const emergencyRoutes = require("./routes/emergency.routes");
 const courseRoutes = require("./routes/course.routes");
@@ -30,6 +31,7 @@ app.use((req, res, next) => {
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/ai", aiRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/courses", courseRoutes);
