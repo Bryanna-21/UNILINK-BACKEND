@@ -3,6 +3,7 @@ const cors = require("cors");
 
 const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
+const aiRoutes = require("./routes/ai.routes");
 const postRoutes = require("./routes/post.routes");
 const emergencyRoutes = require("./routes/emergency.routes");
 const courseRoutes = require("./routes/course.routes");
@@ -30,6 +31,7 @@ app.use((req, res, next) => {
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/ai", aiRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/courses", courseRoutes);
@@ -49,6 +51,33 @@ app.get("/api/health", (req, res) => {
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || "development"
   });
+});
+
+// TEMPORARY DIAGNOSTIC — lists every route Express actually has
+// registered, read directly from the live router stack. Added purely
+// to debug why /api/ai/ask 404s despite the file being correct and
+// mounted the same way as /api/admin/*, which works. Remove once the
+// AI route mystery is solved — this should never ship long-term.
+app.get("/api/_debug/routes", (req, res) => {
+  const routes = [];
+  app._router.stack.forEach((middleware) => {
+    if (middleware.route) {
+      routes.push({
+        path: middleware.route.path,
+        methods: Object.keys(middleware.route.methods),
+      });
+    } else if (middleware.name === "router" && middleware.handle.stack) {
+      middleware.handle.stack.forEach((handler) => {
+        if (handler.route) {
+          routes.push({
+            path: (middleware.regexp?.source || "?") + " -> " + handler.route.path,
+            methods: Object.keys(handler.route.methods),
+          });
+        }
+      });
+    }
+  });
+  res.status(200).json({ status: "success", routeCount: routes.length, routes });
 });
 
 // 404 handler
