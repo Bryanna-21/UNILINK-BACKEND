@@ -52,6 +52,14 @@ exports.createCourse = async (req, res) => {
     });
     res.status(201).json({ status: "success", data: course });
   } catch (error) {
+    // 11000 = MongoDB duplicate key error, thrown by the unique index
+    // on { universityId, code } (see models/Course.js).
+    if (error.code === 11000) {
+      return res.status(409).json({
+        status: "error",
+        message: "A course with this code already exists at your university.",
+      });
+    }
     res.status(500).json({ status: "error", message: "Error creating course: " + error.message });
   }
 };
@@ -98,6 +106,12 @@ exports.createUnit = async (req, res) => {
     const unit = await Unit.create({ courseId: req.params.courseId, title, description, order });
     res.status(201).json({ status: "success", data: unit });
   } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        status: "error",
+        message: "A unit with this title already exists in this course.",
+      });
+    }
     res.status(500).json({ status: "error", message: "Error creating unit: " + error.message });
   }
 };

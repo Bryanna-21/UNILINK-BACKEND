@@ -23,7 +23,19 @@ router.patch("/users/:id/status", ctrl.setUserStatus);
 
 // Universities
 router.get("/universities", ctrl.getUniversities);
+router.post("/universities", ctrl.createUniversity);
 router.patch("/universities/:id/verified", ctrl.setUniversityVerified);
+router.delete("/universities/:id", ctrl.deleteUniversity);
+
+// Courses
+router.get("/courses", ctrl.getCourses);
+router.post("/courses", ctrl.createCourseAdmin);
+router.delete("/courses/:id", ctrl.deleteCourse);
+
+// Units
+router.get("/units", ctrl.getUnits);
+router.post("/units", ctrl.createUnitAdmin);
+router.delete("/units/:id", ctrl.deleteUnit);
 
 // Reports
 router.get("/reports", ctrl.getReports);

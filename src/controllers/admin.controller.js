@@ -1,5 +1,7 @@
 const User = require("../models/User");
 const University = require("../models/University");
+const Course = require("../models/Course");
+const Unit = require("../models/Unit");
 const EmergencyReport = require("../models/EmergencyReport");
 const AuditLog = require("../models/AuditLog");
 const Notification = require("../models/Notification");
@@ -265,6 +267,232 @@ exports.setUniversityVerified = async (req, res) => {
     res.status(200).json({ status: "success", data: university });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error updating university: " + error.message });
+  }
+};
+
+// Duplicate check relies on the unique+collation index on
+// University.name (see models/University.js) - the DB is the real
+// source of truth for uniqueness, this catch just turns MongoDB's raw
+// duplicate-key error into a message an admin can actually read.
+exports.createUniversity = async (req, res) => {
+  try {
+    const { name, country, domainCode } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ status: "error", message: "name is required" });
+    }
+
+    const university = await University.create({
+      name: name.trim(),
+      country,
+      domainCode,
+    });
+
+    await logAdminAction(req, {
+      action: "create_university",
+      targetType: "University",
+      targetId: university._id,
+      details: `Created university "${university.name}"`,
+    });
+
+    res.status(201).json({ status: "success", data: university });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ status: "error", message: "A university with this name already exists." });
+    }
+    res.status(500).json({ status: "error", message: "Error creating university: " + error.message });
+  }
+};
+
+// Deleting a university is destructive to anything that references it
+// (courses, enrolled students' universityId) - deliberately refuses if
+// any course still references it, rather than silently orphaning data.
+// An admin must reassign or remove those courses first.
+exports.deleteUniversity = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: "error", message: "Invalid university id" });
+    }
+
+    const courseCount = await Course.countDocuments({ universityId: id });
+    if (courseCount > 0) {
+      return res.status(409).json({
+        status: "error",
+        message: `Cannot delete: ${courseCount} course(s) still reference this university. Remove or reassign them first.`,
+      });
+    }
+
+    const university = await University.findByIdAndDelete(id);
+    if (!university) {
+      return res.status(404).json({ status: "error", message: "University not found" });
+    }
+
+    await logAdminAction(req, {
+      action: "delete_university",
+      targetType: "University",
+      targetId: id,
+      details: `Deleted university "${university.name}"`,
+    });
+
+    res.status(200).json({ status: "success", data: { deleted: true } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error deleting university: " + error.message });
+  }
+};
+
+// ---------------------------------------------------------------------
+// Courses (admin view/management - the student/lecturer-facing
+// createCourse in course.controller.js already exists and is
+// role-gated; these are the admin equivalents: list-all-with-filter
+// and delete, since course creation from the admin side uses the same
+// underlying model and duplicate constraint)
+// ---------------------------------------------------------------------
+
+exports.getCourses = async (req, res) => {
+  try {
+    const universityId = req.query.universityId;
+    const search = (req.query.search || "").trim();
+
+    const query = {};
+    if (universityId) query.universityId = universityId;
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { code: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    const courses = await Course.find(query).sort({ createdAt: -1 }).lean();
+    res.status(200).json({ status: "success", data: courses });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching courses: " + error.message });
+  }
+};
+
+exports.createCourseAdmin = async (req, res) => {
+  try {
+    const { title, code, description, universityId } = req.body;
+    if (!title || !code || !universityId) {
+      return res.status(400).json({ status: "error", message: "title, code, and universityId are required" });
+    }
+
+    const course = await Course.create({ title, code, description, universityId });
+
+    await logAdminAction(req, {
+      action: "create_course",
+      targetType: "Course",
+      targetId: course._id,
+      details: `Created course "${course.code}" for university ${universityId}`,
+    });
+
+    res.status(201).json({ status: "success", data: course });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ status: "error", message: "A course with this code already exists at this university." });
+    }
+    res.status(500).json({ status: "error", message: "Error creating course: " + error.message });
+  }
+};
+
+// Refuses to delete if units still reference this course, same
+// no-silent-orphan rule as deleteUniversity above.
+exports.deleteCourse = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: "error", message: "Invalid course id" });
+    }
+
+    const unitCount = await Unit.countDocuments({ courseId: id });
+    if (unitCount > 0) {
+      return res.status(409).json({
+        status: "error",
+        message: `Cannot delete: ${unitCount} unit(s) still belong to this course. Remove them first.`,
+      });
+    }
+
+    const course = await Course.findByIdAndDelete(id);
+    if (!course) {
+      return res.status(404).json({ status: "error", message: "Course not found" });
+    }
+
+    await logAdminAction(req, {
+      action: "delete_course",
+      targetType: "Course",
+      targetId: id,
+      details: `Deleted course "${course.code}"`,
+    });
+
+    res.status(200).json({ status: "success", data: { deleted: true } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error deleting course: " + error.message });
+  }
+};
+
+// ---------------------------------------------------------------------
+// Units (admin view/management)
+// ---------------------------------------------------------------------
+
+exports.getUnits = async (req, res) => {
+  try {
+    const courseId = req.query.courseId;
+    const query = {};
+    if (courseId) query.courseId = courseId;
+
+    const units = await Unit.find(query).sort({ order: 1, createdAt: -1 }).lean();
+    res.status(200).json({ status: "success", data: units });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching units: " + error.message });
+  }
+};
+
+exports.createUnitAdmin = async (req, res) => {
+  try {
+    const { title, description, order, courseId } = req.body;
+    if (!title || !courseId) {
+      return res.status(400).json({ status: "error", message: "title and courseId are required" });
+    }
+
+    const unit = await Unit.create({ title, description, order, courseId });
+
+    await logAdminAction(req, {
+      action: "create_unit",
+      targetType: "Unit",
+      targetId: unit._id,
+      details: `Created unit "${unit.title}" for course ${courseId}`,
+    });
+
+    res.status(201).json({ status: "success", data: unit });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ status: "error", message: "A unit with this title already exists in this course." });
+    }
+    res.status(500).json({ status: "error", message: "Error creating unit: " + error.message });
+  }
+};
+
+exports.deleteUnit = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: "error", message: "Invalid unit id" });
+    }
+
+    const unit = await Unit.findByIdAndDelete(id);
+    if (!unit) {
+      return res.status(404).json({ status: "error", message: "Unit not found" });
+    }
+
+    await logAdminAction(req, {
+      action: "delete_unit",
+      targetType: "Unit",
+      targetId: id,
+      details: `Deleted unit "${unit.title}"`,
+    });
+
+    res.status(200).json({ status: "success", data: { deleted: true } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error deleting unit: " + error.message });
   }
 };
 

@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "seed:admin": "node scripts/seedAdmin.js"
+    "seed:admin": "node scripts/seedAdmin.js",
+    "check:duplicates": "node scripts/checkDuplicates.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
