@@ -26,10 +26,10 @@ exports.ask = async (req, res) => {
       return res.status(400).json({ status: "error", message: "message is required" });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!process.env.GEMINI_API_KEY) {
       // Fail clearly rather than silently - if this ever shows up in
       // production it means the env var wasn't set, not a transient error.
-      console.error("✗ OPENAI_API_KEY is not set - cannot serve AI requests");
+      console.error("✗ GEMINI_API_KEY is not set - cannot serve AI requests");
       return res.status(503).json({
         status: "error",
         message: "AI assistant is not configured on the server yet.",
@@ -69,30 +69,39 @@ exports.ask = async (req, res) => {
       { role: "user", content: message.trim().slice(0, 2000) },
     ];
 
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    // Gemini's OpenAI-compatibility layer (Google's own documented
+    // endpoint, not a third-party shim) accepts the standard OpenAI
+    // chat completions request/response shape at this URL - same
+    // fields (model, messages, max_tokens, temperature), same
+    // response shape (choices[0].message.content), so the rest of
+    // this function is unchanged from the OpenAI version. Verify
+    // max_tokens/temperature are honored as expected once a real key
+    // is set; the docs confirm the shape but this hasn't been
+    // exercised against a live Gemini key from this codebase yet.
+    const geminiRes = await fetch("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gemini-2.5-flash",
         messages,
         max_tokens: 600,
         temperature: 0.5,
       }),
     });
 
-    if (!openaiRes.ok) {
-      const errText = await openaiRes.text().catch(() => "");
-      console.error("✗ OpenAI request failed:", openaiRes.status, errText);
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text().catch(() => "");
+      console.error("✗ Gemini request failed:", geminiRes.status, errText);
       return res.status(502).json({
         status: "error",
         message: "The AI assistant is temporarily unavailable. Please try again shortly.",
       });
     }
 
-    const data = await openaiRes.json();
+    const data = await geminiRes.json();
     const reply = data?.choices?.[0]?.message?.content;
 
     if (!reply) {
