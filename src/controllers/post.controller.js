@@ -1,9 +1,10 @@
 const mongoose = require("mongoose");
 const Post = require("../models/Post");
+const { uploadBufferToCloudinary } = require("../config/cloudinary");
 
 exports.createPost = async (req, res) => {
   try {
-    const { content, mediaUrl } = req.body;
+    const { content } = req.body;
 
     if (!content || !content.trim()) {
       return res.status(400).json({
@@ -12,11 +13,36 @@ exports.createPost = async (req, res) => {
       });
     }
 
+    const files = req.files || [];
+
+    let media = [];
+    if (files.length > 0) {
+      try {
+        const uploads = await Promise.all(
+          files.map((file) => {
+            const resourceType = file.mimetype.startsWith("video/") ? "video" : "image";
+            return uploadBufferToCloudinary(file.buffer, "unilink/posts", resourceType).then((result) => ({
+              url: result.secure_url,
+              type: resourceType,
+              publicId: result.public_id,
+            }));
+          })
+        );
+        media = uploads;
+      } catch (uploadError) {
+        console.error("✗ Post media upload failed:", uploadError.message);
+        return res.status(502).json({
+          status: "error",
+          message: "One or more media files failed to upload. Please try again.",
+        });
+      }
+    }
+
     const post = await Post.create({
       userId: req.user.id,
       universityId: req.user.universityId,
       content,
-      mediaUrl,
+      media,
     });
 
     res.status(201).json({
