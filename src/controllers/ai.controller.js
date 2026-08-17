@@ -85,7 +85,7 @@ exports.ask = async (req, res) => {
         Authorization: `Bearer ${process.env.GEMINI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gemini-2.5-flash",
+        model: "gemini-3.6-flash",
         messages,
         max_tokens: 600,
         temperature: 0.5,
