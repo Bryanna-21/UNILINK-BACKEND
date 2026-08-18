@@ -1,5 +1,7 @@
+const mongoose = require("mongoose");
 const Portfolio = require("../models/Portfolio");
 const Achievement = require("../models/Achievement");
+const User = require("../models/User");
 const { uploadBufferToCloudinary } = require("../config/cloudinary");
 
 exports.getMyPortfolio = async (req, res) => {
@@ -83,5 +85,27 @@ exports.getAchievementsForUser = async (req, res) => {
     res.status(200).json({ status: "success", count: achievements.length, data: achievements });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching achievements: " + error.message });
+  }
+};
+
+// Minimal, non-sensitive user lookup — used to resolve a display name
+// for a conversation partner in Messages. Deliberately selects only
+// name/role: never email, password, universityId, or status. Any
+// authenticated user can look up any other user's name this way,
+// which is the same exposure level as seeing someone's name on a
+// post or in a shared course roster — not a new privacy surface,
+// just enough to avoid showing raw ObjectIds in the messages UI.
+exports.getUserSummary = async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.userId)) {
+      return res.status(400).json({ status: "error", message: "Invalid user id" });
+    }
+    const user = await User.findById(req.params.userId).select("name role");
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    res.status(200).json({ status: "success", data: { _id: user._id, name: user.name, role: user.role } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching user summary: " + error.message });
   }
 };

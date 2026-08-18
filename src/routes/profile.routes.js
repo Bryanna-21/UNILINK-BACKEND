@@ -9,5 +9,6 @@ router.post("/portfolio/resume", auth, uploadDocument.single("file"), ctrl.uploa
 router.post("/portfolio/certificates", auth, uploadDocument.single("file"), ctrl.addCertificate);
 router.get("/achievements", auth, ctrl.getAchievementsForUser);
 router.get("/achievements/:userId", auth, ctrl.getAchievementsForUser);
+router.get("/summary/:userId", auth, ctrl.getUserSummary);
 
 module.exports = router;
