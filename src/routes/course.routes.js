@@ -11,6 +11,7 @@ router.get("/", auth, ctrl.getCourses);
 router.post("/", auth, ctrl.createCourse);
 router.get("/:id", auth, ctrl.getCourseById);
 router.post("/:id/enroll", auth, ctrl.enrollInCourse);
+router.get("/:courseId/students", auth, ctrl.getStudentsForCourse);
 
 // Units
 router.get("/:courseId/units", auth, ctrl.getUnitsForCourse);

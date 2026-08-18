@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const User = require("../models/User");
 const Course = require("../models/Course");
 const Unit = require("../models/Unit");
 const Assignment = require("../models/Assignment");
@@ -351,5 +352,46 @@ exports.getMyResultForCat = async (req, res) => {
     res.status(200).json({ status: "success", data: result || null });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching result: " + error.message });
+  }
+};
+
+// Lists the students enrolled in a course, for the "start a new
+// conversation" flow in Messages — a student can only see the roster
+// of a course they're themselves enrolled in. Deliberately stricter
+// than getCourseById (which has no enrollment check at all): a course
+// title is low-sensitivity, a list of real names is not, so this
+// endpoint checks membership even though its neighbor doesn't.
+//
+// Returns only _id/name/role per student, same minimal-exposure
+// pattern as profile.controller.js's getUserSummary — never email,
+// universityId, or status.
+exports.getStudentsForCourse = async (req, res) => {
+  try {
+    if (!isValidId(req.params.courseId)) {
+      return res.status(400).json({ status: "error", message: "Invalid course id" });
+    }
+
+    const course = await Course.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ status: "error", message: "Course not found" });
+    }
+
+    const enrolledIds = Array.isArray(course.enrolledStudentIds) ? course.enrolledStudentIds : [];
+    if (!enrolledIds.includes(req.user.id)) {
+      return res.status(403).json({
+        status: "error",
+        message: "You must be enrolled in this course to view its roster",
+      });
+    }
+
+    const students = await User.find({ _id: { $in: enrolledIds } }).select("name role");
+
+    res.status(200).json({
+      status: "success",
+      count: students.length,
+      data: students.map((s) => ({ _id: s._id, name: s.name, role: s.role })),
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching course roster: " + error.message });
   }
 };
