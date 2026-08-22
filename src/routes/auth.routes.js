@@ -177,7 +177,15 @@ router.post("/resend-otp", async (req, res) => {
     }
 
     const code = await createOtp(userId, "verify_signup");
-    await sendOtpEmail(user.email, code, "verify_signup");
+    try {
+      await sendOtpEmail(user.email, code, "verify_signup");
+    } catch (emailError) {
+      console.error("✗ Failed to resend OTP email:", emailError.message);
+      return res.status(502).json({
+        status: "error",
+        message: "Could not send the verification email right now. Please try again shortly.",
+      });
+    }
 
     res.status(200).json({ status: "success", message: "A new code has been sent." });
   } catch (error) {
@@ -235,7 +243,15 @@ router.post("/login", async (req, res) => {
     // above, reusing the same OtpCode model with a different purpose.
     if (user.twoFactorEnabled) {
       const code = await createOtp(user._id.toString(), "login_2fa");
-      await sendOtpEmail(user.email, code, "login_2fa");
+      try {
+        await sendOtpEmail(user.email, code, "login_2fa");
+      } catch (emailError) {
+        console.error("✗ Failed to send 2FA login OTP email:", emailError.message);
+        return res.status(502).json({
+          status: "error",
+          message: "Could not send the login code right now. Please try again shortly.",
+        });
+      }
 
       return res.status(200).json({
         status: "success",
