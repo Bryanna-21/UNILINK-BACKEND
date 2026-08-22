@@ -1,21 +1,14 @@
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 const crypto = require("crypto");
 const OtpCode = require("../models/OtpCode");
 
 const OTP_LENGTH = 6;
 const OTP_TTL_MINUTES = 10;
 
-// Gmail SMTP via a dedicated sending account's app password (not the
-// account's normal login password - see GMAIL_APP_PASSWORD in
-// Render's env vars). This account is used only for outbound
-// transactional email, kept separate from any personal account.
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_SENDER_EMAIL,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  },
-});
+// Resend over HTTPS - no SMTP handshake, no socket to hang, and it
+// gives us a proper thrown error object on failure instead of Gmail
+// SMTP's tendency to just stall or silently drop the send.
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // crypto.randomInt is cryptographically secure, unlike Math.random -
 // worth using here since this is an auth-security code, not a
@@ -61,6 +54,11 @@ async function verifyOtp(userId, purpose, submittedCode) {
   return true;
 }
 
+// Sends the OTP email via Resend's API. Unlike the old nodemailer/Gmail
+// path, this throws a real Error with a message on failure - it does
+// NOT swallow the failure or return silently, because the caller needs
+// to know if the email didn't go out so it can respond to the client
+// correctly rather than pretending success.
 async function sendOtpEmail(toEmail, code, purpose) {
   const subject =
     purpose === "verify_signup" ? "Verify your UniLink account" : "Your UniLink login code";
@@ -70,12 +68,24 @@ async function sendOtpEmail(toEmail, code, purpose) {
       ? `Your UniLink verification code is ${code}. It expires in ${OTP_TTL_MINUTES} minutes.`
       : `Your UniLink login code is ${code}. It expires in ${OTP_TTL_MINUTES} minutes. If you didn't try to log in, you can ignore this email.`;
 
-  await transporter.sendMail({
-    from: `"UniLink" <${process.env.GMAIL_SENDER_EMAIL}>`,
+  const { data, error } = await resend.emails.send({
+    // FROM_EMAIL must be on a domain you've verified in Resend.
+    // Using their shared test domain (onboarding@resend.dev) works
+    // for development but is rate-limited and not meant for real users.
+    from: process.env.RESEND_FROM_EMAIL || "UniLink <onboarding@resend.dev>",
     to: toEmail,
     subject,
     text: body,
   });
+
+  if (error) {
+    // Surface the real reason (bad API key, unverified domain,
+    // rate limit, invalid recipient, etc.) instead of a generic
+    // "email failed" the caller can't act on.
+    throw new Error(`Resend failed to send OTP email: ${error.message || JSON.stringify(error)}`);
+  }
+
+  return data;
 }
 
 module.exports = { createOtp, verifyOtp, sendOtpEmail, OTP_TTL_MINUTES };
