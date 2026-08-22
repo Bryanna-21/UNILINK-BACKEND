@@ -9,12 +9,23 @@ const OTP_TTL_MINUTES = 10;
 // account's normal login password - see GMAIL_APP_PASSWORD in
 // Render's env vars). This account is used only for outbound
 // transactional email, kept separate from any personal account.
+//
+// Using explicit SMTP config (not the "service: gmail" shorthand) with
+// a generous timeout — Render's outbound connections to Gmail's SMTP
+// ports have shown a "Connection timeout" failure, worth ruling out
+// whether that's the shorthand's default timeout being too aggressive
+// versus a genuine network-level block on this host.
 const transporter = nodemailer.createTransport({
-  service: "gmail",
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.GMAIL_SENDER_EMAIL,
     pass: process.env.GMAIL_APP_PASSWORD,
   },
+  connectionTimeout: 20000,
+  greetingTimeout: 20000,
+  socketTimeout: 20000,
 });
 
 // crypto.randomInt is cryptographically secure, unlike Math.random -
