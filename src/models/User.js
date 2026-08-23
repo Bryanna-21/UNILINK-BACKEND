@@ -1,5 +1,4 @@
 const mongoose = require("mongoose");
-
 const userSchema = new mongoose.Schema({
   name: String,
   email: { type: String, unique: true },
@@ -13,7 +12,11 @@ const userSchema = new mongoose.Schema({
   // twoFactorEnabled is opt-in, off by default, toggled from Settings.
   isVerified: { type: Boolean, default: false },
   twoFactorEnabled: { type: Boolean, default: false },
+  // Holds the new (already-hashed) password while a password-change
+  // request is awaiting OTP confirmation. Set in
+  // /request-password-change, promoted to `password` and cleared in
+  // /confirm-password-change. Never populated outside that flow.
+  pendingPasswordHash: { type: String, default: undefined },
   createdAt: { type: Date, default: Date.now }
 });
-
 module.exports = mongoose.model("User", userSchema);
