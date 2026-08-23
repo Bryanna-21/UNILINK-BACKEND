@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require("jsonwebtoken");
 const bcryptjs = require("bcryptjs");
 const User = require("../models/User");
+const authMiddleware = require("../middleware/auth.middleware");
 const { createOtp, verifyOtp, sendOtpEmail } = require("../utils/otp.util");
 
 // Kept as the single source of truth for valid roles across the app
@@ -306,6 +307,115 @@ router.post("/verify-login-otp", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error completing login: " + error.message });
+  }
+});
+
+// Requests a password change: caller must already be logged in AND
+// re-supply their current password (not just hold a valid token) —
+// this prevents an unattended, already-authenticated session from
+// being used by someone else to silently change the password. On
+// success, sends an OTP to the account's own email; the actual
+// password is NOT changed until /confirm-password-change verifies it.
+router.post("/request-password-change", authMiddleware, async (req, res) => {
+  try {
+    const { currentPassword, newPassword, confirmNewPassword } = req.body;
+
+    if (!currentPassword || !newPassword || !confirmNewPassword) {
+      return res.status(400).json({
+        status: "error",
+        message: "currentPassword, newPassword, and confirmNewPassword are required",
+      });
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      return res.status(400).json({ status: "error", message: "New passwords do not match" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        status: "error",
+        message: "New password must be at least 6 characters long",
+      });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
+    const isCurrentPasswordValid = await bcryptjs.compare(currentPassword, user.password);
+    if (!isCurrentPasswordValid) {
+      return res.status(400).json({ status: "error", message: "Current password is incorrect" });
+    }
+
+    // The new password is hashed and stashed on the user document now
+    // (not saved as the active password yet) so /confirm-password-change
+    // doesn't need the client to resend it alongside the OTP - the
+    // client only needs to send the code back.
+    user.pendingPasswordHash = await bcryptjs.hash(newPassword, 10);
+    await user.save();
+
+    const code = await createOtp(user._id.toString(), "password_change");
+    try {
+      await sendOtpEmail(user.email, code, "password_change");
+    } catch (emailError) {
+      console.error("✗ Failed to send password-change OTP email:", emailError.message);
+      return res.status(502).json({
+        status: "error",
+        message: "Could not send the confirmation email right now. Please try again shortly.",
+      });
+    }
+
+    res.status(200).json({
+      status: "success",
+      message: "A confirmation code has been sent to your email.",
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Error requesting password change: " + error.message,
+    });
+  }
+});
+
+// Confirms a password change: verifies the OTP, then promotes the
+// pendingPasswordHash (set in /request-password-change) to the
+// user's actual password. Requires the same authenticated session
+// that started the request.
+router.post("/confirm-password-change", authMiddleware, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ status: "error", message: "code is required" });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
+    if (!user.pendingPasswordHash) {
+      return res.status(400).json({
+        status: "error",
+        message: "No password change is currently pending. Please start again.",
+      });
+    }
+
+    const isValid = await verifyOtp(user._id.toString(), "password_change", code);
+    if (!isValid) {
+      return res.status(400).json({ status: "error", message: "Invalid or expired code" });
+    }
+
+    user.password = user.pendingPasswordHash;
+    user.pendingPasswordHash = undefined;
+    await user.save();
+
+    res.status(200).json({ status: "success", message: "Password changed successfully." });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Error confirming password change: " + error.message,
+    });
   }
 });
 
