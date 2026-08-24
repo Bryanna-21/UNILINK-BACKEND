@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose");
 
 const authRoutes = require("./routes/auth.routes");
 const adminRoutes = require("./routes/admin.routes");
@@ -17,18 +18,66 @@ const messageRoutes = require("./routes/message.routes");
 
 const app = express();
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ============================================================
+// CORS
+// ============================================================
 
-// Request logging middleware
+const allowedOrigins = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow mobile apps, Postman and server-to-server requests.
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // Development convenience.
+      if (process.env.NODE_ENV !== "production") {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS policy: origin not allowed"));
+    },
+    credentials: true,
+  })
+);
+
+// ============================================================
+// BODY PARSING
+// ============================================================
+
+app.use(express.json({ limit: "1mb" }));
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "1mb",
+  })
+);
+
+// ============================================================
+// REQUEST LOGGING
+// ============================================================
+
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  console.log(
+    `[${new Date().toISOString()}] ${req.method} ${req.path}`
+  );
   next();
 });
 
-// Routes
+// ============================================================
+// ROUTES
+// ============================================================
+
 app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
@@ -43,47 +92,68 @@ app.use("/api/library", libraryRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/messages", messageRoutes);
 
-// Health check endpoint
-app.get("/api/health", (req, res) => {
-  res.status(200).json({
-    status: "OK",
-    message: "Server is running",
+// ============================================================
+// HEALTH CHECK
+// ============================================================
+
+app.get("/api/health", async (req, res) => {
+  const mongoState = mongoose.connection.readyState;
+  const databaseConnected = mongoState === 1;
+
+  res.status(databaseConnected ? 200 : 503).json({
+    status: databaseConnected ? "OK" : "DEGRADED",
+    message: databaseConnected
+      ? "UniLink backend is healthy"
+      : "UniLink backend is running but database is unavailable",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development"
+    environment: process.env.NODE_ENV || "development",
+    database: databaseConnected ? "connected" : "disconnected",
   });
 });
 
-// 404 handler
+// ============================================================
+// 404 HANDLER
+// ============================================================
+
 app.use((req, res) => {
   res.status(404).json({
     status: "error",
     message: "Route not found",
     path: req.path,
-    method: req.method
+    method: req.method,
   });
 });
 
-// Error handling middleware
+// ============================================================
+// ERROR HANDLER
+// ============================================================
+
 app.use((err, req, res, next) => {
   console.error("Error:", err);
 
-  // Multer errors (file too large, wrong field, etc.) have a
-  // recognizable shape distinct from normal thrown errors — handle
-  // them with a clear 400 instead of falling through to a generic 500.
   if (err.name === "MulterError") {
     return res.status(400).json({
       status: "error",
-      message: "File upload error: " + err.message
+      message: "File upload error: " + err.message,
+    });
+  }
+
+  if (err.message === "CORS policy: origin not allowed") {
+    return res.status(403).json({
+      status: "error",
+      message: "Origin not allowed by CORS policy",
     });
   }
 
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
-  
+
   res.status(status).json({
     status: "error",
-    message: message,
-    ...(process.env.NODE_ENV === "development" && { stack: err.stack })
+    message,
+    ...(process.env.NODE_ENV === "development" && {
+      stack: err.stack,
+    }),
   });
 });
 
