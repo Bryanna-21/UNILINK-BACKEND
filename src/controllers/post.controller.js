@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const Post = require("../models/Post");
+const User = require("../models/User");
 const {
   uploadBufferToCloudinary,
   cloudinary,
@@ -7,6 +8,28 @@ const {
 
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
+}
+
+function getUserRole(req) {
+  return req.user?.role;
+}
+
+// Attaches a minimal { name } for each post's author without a
+// separate round trip per post - one query for all authors involved,
+// keyed by userId. Posts are stored with userId as a plain string
+// (not a Mongoose ref), so this is a manual join, not .populate().
+async function attachAuthorNames(posts) {
+  const userIds = [...new Set(posts.map((p) => String(p.userId)))];
+  const users = await User.find({ _id: { $in: userIds } })
+    .select("_id name")
+    .lean();
+
+  const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+
+  return posts.map((p) => ({
+    ...p,
+    authorName: nameById.get(String(p.userId)) || "Unknown user",
+  }));
 }
 
 exports.createPost = async (req, res) => {
@@ -126,10 +149,12 @@ exports.getFeed = async (req, res) => {
       .limit(50)
       .lean();
 
+    const postsWithAuthors = await attachAuthorNames(posts);
+
     return res.status(200).json({
       status: "success",
-      count: posts.length,
-      data: posts,
+      count: postsWithAuthors.length,
+      data: postsWithAuthors,
     });
   } catch (error) {
     console.error("Get feed error:", error);
@@ -161,9 +186,11 @@ exports.getPostById = async (req, res) => {
       });
     }
 
+    const [postWithAuthor] = await attachAuthorNames([post]);
+
     return res.status(200).json({
       status: "success",
-      data: post,
+      data: postWithAuthor,
     });
   } catch (error) {
     console.error("Get post error:", error);
@@ -175,10 +202,14 @@ exports.getPostById = async (req, res) => {
   }
 };
 
+// Deletion is allowed for the post's original author OR any admin.
+// Everyone else gets a 403, same as before - this just adds the
+// admin bypass that was previously missing entirely.
 exports.deletePost = async (req, res) => {
   try {
     const { id } = req.params;
     const userId = getUserId(req);
+    const role = getUserRole(req);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -196,7 +227,10 @@ exports.deletePost = async (req, res) => {
       });
     }
 
-    if (String(post.userId) !== String(userId)) {
+    const isAuthor = String(post.userId) === String(userId);
+    const isAdmin = role === "admin";
+
+    if (!isAuthor && !isAdmin) {
       return res.status(403).json({
         status: "error",
         message: "You can only delete your own posts",
