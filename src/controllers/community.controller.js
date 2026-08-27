@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const User = require("../models/User");
 const Comment = require("../models/Comment");
 const Discussion = require("../models/Discussion");
 const Club = require("../models/Club");
@@ -172,7 +173,26 @@ exports.createProject = async (req, res) => {
 exports.getStudyGroups = async (req, res) => {
   try {
     const groups = await StudyGroup.find({}).sort({ createdAt: -1 });
-    res.status(200).json({ status: "success", count: groups.length, data: groups });
+
+    // Collect every distinct member id across all groups in one pass,
+    // then fetch names in a single query rather than one query per
+    // group - memberIds are stored as plain strings (see
+    // StudyGroup.js), not real refs, so this can't use .populate().
+    const allMemberIds = [...new Set(groups.flatMap((g) => g.memberIds))];
+    const validIds = allMemberIds.filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    const users = await User.find({ _id: { $in: validIds } }).select("name");
+    const nameById = Object.fromEntries(users.map((u) => [u._id.toString(), u.name]));
+
+    const groupsWithMemberNames = groups.map((group) => ({
+      ...group.toObject(),
+      members: group.memberIds.map((id) => ({
+        id,
+        name: nameById[id] || "Unknown user",
+      })),
+    }));
+
+    res.status(200).json({ status: "success", count: groups.length, data: groupsWithMemberNames });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching study groups: " + error.message });
   }
