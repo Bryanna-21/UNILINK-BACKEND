@@ -24,6 +24,7 @@ const generateToken = (user) => {
   return jwt.sign(
     {
       id: user._id,
+      tokenVersion: user.tokenVersion,
       role: user.role,
       universityId: user.universityId,
     },
@@ -416,6 +417,105 @@ router.post("/confirm-password-change", authMiddleware, async (req, res) => {
       status: "error",
       message: "Error confirming password change: " + error.message,
     });
+  }
+});
+
+
+// Starts a password reset for a logged-out user. Deliberately does
+// NOT reveal whether the email exists — the response is identical
+// either way, so this endpoint can't be used to enumerate registered
+// accounts. If the email does belong to an account, an OTP is sent;
+// if not, nothing happens, but the client sees the same success
+// message regardless.
+router.post("/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ status: "error", message: "Email is required" });
+    }
+
+    const genericResponse = {
+      status: "success",
+      message: "If an account exists for that email, a reset code has been sent.",
+    };
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      // Same response as the success case — do not reveal non-existence.
+      return res.status(200).json(genericResponse);
+    }
+
+    const code = await createOtp(user._id.toString(), "password_reset");
+    try {
+      await sendOtpEmail(user.email, code, "password_reset");
+    } catch (emailError) {
+      console.error("✗ Failed to send password-reset OTP email:", emailError.message);
+      // Still return the generic response — do not leak that this
+      // specific email's send failed, which would itself reveal the
+      // email exists. The user can retry; if it keeps failing that's
+      // an operational issue to catch via server logs, not a signal
+      // to hand back to an unauthenticated caller.
+    }
+
+    res.status(200).json(genericResponse);
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error processing request: " + error.message });
+  }
+});
+
+// Completes a password reset: verifies the OTP against the email
+// (not a userId, since the caller is logged out and was never given
+// one), then sets the new password directly. Also bumps tokenVersion
+// so any existing sessions for this account are invalidated — this
+// is the one password-change flow that should log out other
+// sessions, since it exists specifically to recover from a
+// potentially-compromised or lost-access account.
+router.post("/reset-password", async (req, res) => {
+  try {
+    const { email, code, newPassword, confirmNewPassword } = req.body;
+
+    if (!email || !code || !newPassword || !confirmNewPassword) {
+      return res.status(400).json({
+        status: "error",
+        message: "email, code, newPassword, and confirmNewPassword are required",
+      });
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      return res.status(400).json({ status: "error", message: "New passwords do not match" });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        status: "error",
+        message: "New password must be at least 6 characters long",
+      });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      // A wrong/expired code and a nonexistent email should look the
+      // same to the caller, for the same enumeration-prevention
+      // reason as /forgot-password above.
+      return res.status(400).json({ status: "error", message: "Invalid or expired code" });
+    }
+
+    const isValid = await verifyOtp(user._id.toString(), "password_reset", code);
+    if (!isValid) {
+      return res.status(400).json({ status: "error", message: "Invalid or expired code" });
+    }
+
+    user.password = await bcryptjs.hash(newPassword, 10);
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    res.status(200).json({
+      status: "success",
+      message: "Password reset successfully. Please log in with your new password.",
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error resetting password: " + error.message });
   }
 });
 

@@ -101,6 +101,11 @@ const EMAIL_COPY = {
     intro: (code) =>
       `Your code to confirm this password change is ${code}. If you didn't request a password change, ignore this email and your password will remain unchanged.`,
   },
+  password_reset: {
+    subject: "Reset your UniLink password",
+    intro: (code) =>
+      `Your code to reset your UniLink password is ${code}. If you didn't request this, you can safely ignore this email — your password will remain unchanged.`,
+  },
 };
 
 // Sends the OTP email via Brevo's API. Throws a real Error with a

@@ -9,7 +9,7 @@ const otpCodeSchema = new mongoose.Schema({
   code: { type: String, required: true },
   purpose: {
     type: String,
-    enum: ["verify_signup", "login_2fa", "password_change", "new_device_login"],
+    enum: ["verify_signup", "login_2fa", "password_change", "new_device_login", "password_reset"],
     required: true,
   },
   used: { type: Boolean, default: false },

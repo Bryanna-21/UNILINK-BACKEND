@@ -17,6 +17,8 @@ const userSchema = new mongoose.Schema({
   // /request-password-change, promoted to `password` and cleared in
   // /confirm-password-change. Never populated outside that flow.
   pendingPasswordHash: { type: String, default: undefined },
+    pendingResetPasswordHash: { type: String, default: undefined },
+  tokenVersion: { type: Number, default: 0 }, 
   createdAt: { type: Date, default: Date.now }
 });
 module.exports = mongoose.model("User", userSchema);
