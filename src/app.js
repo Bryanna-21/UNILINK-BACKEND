@@ -15,6 +15,7 @@ const lostAndFoundRoutes = require("./routes/lostAndFound.routes");
 const libraryRoutes = require("./routes/library.routes");
 const profileRoutes = require("./routes/profile.routes");
 const messageRoutes = require("./routes/message.routes");
+const examRoutes = require("./routes/exam.routes");
 
 const app = express();
 
@@ -85,6 +86,7 @@ app.use("/api/posts", postRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/community", communityRoutes);
+app.use("/api/exams", examRoutes);
 app.use("/api/events", eventRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/lost-and-found", lostAndFoundRoutes);
