@@ -26,7 +26,21 @@ exports.uploadNote = async (req, res) => {
     if (!title) {
       return res.status(400).json({ status: "error", message: "title is required" });
     }
+
+    // Map the real mimetype to a stored fileType, rather than the
+    // previous binary "isImage ? image : pdf" check, which silently
+    // mislabeled every non-image upload (including Word documents)
+    // as "pdf" even though the actual file on Cloudinary was
+    // correct. Cloudinary's resource_type only needs to distinguish
+    // image vs raw, so that check is kept separate from fileType.
     const isImage = req.file.mimetype.startsWith("image/");
+    const fileTypeByMimetype = {
+      "application/pdf": "pdf",
+      "application/msword": "doc",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    };
+    const fileType = isImage ? "image" : (fileTypeByMimetype[req.file.mimetype] || "pdf");
+
     const result = await uploadBufferToCloudinary(
       req.file.buffer,
       "unilink/notes",
@@ -37,7 +51,7 @@ exports.uploadNote = async (req, res) => {
       unitId,
       title,
       fileUrl: result.secure_url,
-      fileType: isImage ? "image" : "pdf",
+      fileType,
       uploadedBy: req.user.id
     });
     res.status(201).json({ status: "success", data: note });

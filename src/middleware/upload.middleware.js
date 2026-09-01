@@ -11,11 +11,17 @@ const imageFilter = (req, file, cb) => {
 };
 
 const documentFilter = (req, file, cb) => {
-  const allowed = ["application/pdf", "image/jpeg", "image/png"];
+  const allowed = [
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
   if (allowed.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Only PDF, JPEG, or PNG files are allowed"), false);
+    cb(new Error("Only PDF, JPEG, PNG, DOC, or DOCX files are allowed"), false);
   }
 };
 
