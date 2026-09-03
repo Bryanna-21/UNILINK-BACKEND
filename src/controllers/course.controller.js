@@ -8,12 +8,16 @@ const CAT = require("../models/CAT");
 const Result = require("../models/Result");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
-
-// ---------- Courses ----------
-
 exports.getCourses = async (req, res) => {
   try {
-    const courses = await Course.find({}).sort({ createdAt: -1 });
+    let query = {};
+    if (req.user.role === "student") {
+      query = { enrolledStudentIds: req.user.id };
+    } else if (req.user.role === "lecturer") {
+      query = { lecturerId: req.user.id };
+    }
+    // admin: no filter, sees every course
+    const courses = await Course.find(query).sort({ createdAt: -1 });
     res.status(200).json({ status: "success", count: courses.length, data: courses });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching courses: " + error.message });
