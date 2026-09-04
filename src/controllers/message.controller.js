@@ -6,16 +6,60 @@ const Course = require("../models/Course");
 // NOTE: this is REST-only persistence. There is no Socket.io here —
 // messages are saved and fetched via HTTP, meaning clients have to
 // poll (re-fetch) to see new messages rather than receive them
-// instantly. Real-time delivery, typing indicators, and read receipts
-// all need a Socket.io layer added on top of this, which is a
-// separate piece of work, not bundled in here.
+// instantly. Real-time delivery and typing indicators still need a
+// Socket.io layer added on top of this. Read tracking (below) is now
+// built, reusing Message.readBy rather than a separate model — see
+// getMessages for where messages actually get marked read.
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
+
+// Unread count per conversation: messages NOT sent by this user where
+// this user's id isn't yet in readBy. Own messages are pre-seeded
+// into their own readBy at send time (see sendMessage) and are never
+// counted as unread to their own sender regardless.
+//
+// Single aggregation across every conversation the user is a
+// participant in, rather than one query per conversation — avoids an
+// N+1 query pattern as the conversation list grows.
+const getUnreadCounts = async (conversationIds, userId) => {
+  const counts = await Message.aggregate([
+    {
+      $match: {
+        conversationId: { $in: conversationIds.map(String) },
+        senderId: { $ne: userId },
+        readBy: { $ne: userId },
+      },
+    },
+    {
+      $group: {
+        _id: "$conversationId",
+        count: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const countByConversationId = {};
+  counts.forEach((c) => {
+    countByConversationId[c._id] = c.count;
+  });
+  return countByConversationId;
+};
 
 exports.getMyConversations = async (req, res) => {
   try {
     const conversations = await Conversation.find({ participantIds: req.user.id }).sort({ lastMessageAt: -1 });
-    res.status(200).json({ status: "success", count: conversations.length, data: conversations });
+
+    const countByConversationId = await getUnreadCounts(
+      conversations.map((c) => c._id),
+      req.user.id
+    );
+
+    const withUnread = conversations.map((c) => ({
+      ...c.toObject(),
+      unreadCount: countByConversationId[c._id.toString()] || 0,
+    }));
+
+    res.status(200).json({ status: "success", count: withUnread.length, data: withUnread });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching conversations: " + error.message });
   }
@@ -226,6 +270,12 @@ exports.leaveConversation = async (req, res) => {
   }
 };
 
+// Fetching messages now also marks every unread message in this
+// conversation as read by the current user — there is no separate
+// "mark as read" action or endpoint. Opening a conversation IS the
+// read action, matching how most chat apps behave. $addToSet avoids
+// duplicate entries if this fires more than once for the same user
+// (e.g. re-fetching during polling).
 exports.getMessages = async (req, res) => {
   try {
     if (!isValidId(req.params.conversationId)) {
@@ -235,6 +285,16 @@ exports.getMessages = async (req, res) => {
     if (!conversation || !conversation.participantIds.includes(req.user.id)) {
       return res.status(403).json({ status: "error", message: "Not a participant in this conversation" });
     }
+
+    await Message.updateMany(
+      {
+        conversationId: req.params.conversationId,
+        senderId: { $ne: req.user.id },
+        readBy: { $ne: req.user.id },
+      },
+      { $addToSet: { readBy: req.user.id } }
+    );
+
     const messages = await Message.find({ conversationId: req.params.conversationId }).sort({ createdAt: 1 });
     res.status(200).json({ status: "success", count: messages.length, data: messages });
   } catch (error) {
