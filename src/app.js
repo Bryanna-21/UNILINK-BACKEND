@@ -11,6 +11,7 @@ const courseRoutes = require("./routes/course.routes");
 const communityRoutes = require("./routes/community.routes");
 const eventRoutes = require("./routes/event.routes");
 const marketplaceRoutes = require("./routes/marketplace.routes");
+const userNotificationRoutes = require("./routes/userNotification.routes");
 const lostAndFoundRoutes = require("./routes/lostAndFound.routes");
 const libraryRoutes = require("./routes/library.routes");
 const profileRoutes = require("./routes/profile.routes");
@@ -93,6 +94,7 @@ app.use("/api/lost-and-found", lostAndFoundRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/notifications", userNotificationRoutes);
 
 // ============================================================
 // HEALTH CHECK

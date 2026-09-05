@@ -6,6 +6,7 @@ const Assignment = require("../models/Assignment");
 const Submission = require("../models/Submission");
 const CAT = require("../models/CAT");
 const Result = require("../models/Result");
+const notifyUsers = require("../middleware/notifyUsers.middleware");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 exports.getCourses = async (req, res) => {
@@ -255,6 +256,16 @@ exports.gradeSubmission = async (req, res) => {
     submission.gradedAt = new Date();
     submission.gradedBy = req.user.id;
     await submission.save();
+
+    const gradedAssignment = await Assignment.findById(submission.assignmentId);
+    notifyUsers({
+      recipientIds: submission.studentId,
+      type: "grade_posted",
+      title: "Assignment graded",
+      message: gradedAssignment ? `Your submission for "${gradedAssignment.title}" has been graded.` : "Your assignment has been graded.",
+      link: gradedAssignment ? `/student/courses/${gradedAssignment.courseId}` : null,
+      context: { courseId: gradedAssignment?.courseId, assignmentId: submission.assignmentId },
+    });
     res.status(200).json({ status: "success", data: submission });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error grading submission: " + error.message });
@@ -327,6 +338,8 @@ exports.publishResult = async (req, res) => {
       return res.status(400).json({ status: "error", message: "studentId and numeric score are required" });
     }
 
+    const publishedCat = await CAT.findById(req.params.catId);
+
     const existing = await Result.findOne({ catId: req.params.catId, studentId });
     if (existing) {
       existing.score = score;
@@ -334,6 +347,14 @@ exports.publishResult = async (req, res) => {
       existing.publishedAt = new Date();
       existing.publishedBy = req.user.id;
       await existing.save();
+      notifyUsers({
+        recipientIds: studentId,
+        type: "grade_posted",
+        title: "CAT result updated",
+        message: publishedCat ? `Your result for "${publishedCat.title}" has been updated.` : "Your CAT result has been updated.",
+        link: publishedCat ? `/student/courses/${publishedCat.courseId}` : null,
+        context: { courseId: publishedCat?.courseId },
+      });
       return res.status(200).json({ status: "success", data: existing });
     }
 
@@ -343,6 +364,14 @@ exports.publishResult = async (req, res) => {
       score,
       feedback,
       publishedBy: req.user.id
+    });
+    notifyUsers({
+      recipientIds: studentId,
+      type: "grade_posted",
+      title: "CAT result published",
+      message: publishedCat ? `Your result for "${publishedCat.title}" has been published.` : "Your CAT result has been published.",
+      link: publishedCat ? `/student/courses/${publishedCat.courseId}` : null,
+      context: { courseId: publishedCat?.courseId },
     });
     res.status(201).json({ status: "success", data: result });
   } catch (error) {
