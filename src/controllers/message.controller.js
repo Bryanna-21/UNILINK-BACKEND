@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
 const Course = require("../models/Course");
+const notifyUsers = require("../middleware/notifyUsers.middleware");
 
 // NOTE: this is REST-only persistence. There is no Socket.io here —
 // messages are saved and fetched via HTTP, meaning clients have to
@@ -323,6 +324,17 @@ exports.sendMessage = async (req, res) => {
     });
     conversation.lastMessageAt = new Date();
     await conversation.save();
+    if (conversation.type === "direct") {
+      const recipientId = conversation.participantIds.find((id) => id !== req.user.id);
+      notifyUsers({
+        recipientIds: recipientId,
+        type: "new_message",
+        title: "New message",
+        message: text.trim().length > 80 ? text.trim().slice(0, 80) + "..." : text.trim(),
+        link: `/messages/${req.params.conversationId}`,
+        context: { conversationId: req.params.conversationId },
+      });
+    }
     res.status(201).json({ status: "success", data: message });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error sending message: " + error.message });
