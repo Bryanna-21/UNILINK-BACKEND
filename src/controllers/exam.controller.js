@@ -69,10 +69,6 @@ exports.getExamById = async (req, res) => {
 // deliberately not built for this pass, since silently scoring
 // essay/short answers as 0 would misrepresent a student's actual
 // performance. Grading is lecturer-side work for a later session.
-//
-// NOTE: does not currently check exam.status before accepting a
-// submission — a Completed/closed exam can still be submitted to.
-// Flagged, not fixed, as of the close/duplicate addition below.
 exports.submitExam = async (req, res) => {
   try {
     if (!isValidId(req.params.id)) {
@@ -223,9 +219,6 @@ exports.updateExam = async (req, res) => {
     if (!exam) {
       return res.status(404).json({ status: "error", message: "Exam not found" });
     }
-    if (exam.status !== "Published") {
-      return res.status(409).json({ status: "error", message: "This exam is not open for submissions." });
-    }
     if (exam.createdBy !== req.user.id) {
       return res.status(403).json({ status: "error", message: "You do not own this exam" });
     }
@@ -264,9 +257,6 @@ exports.publishExam = async (req, res) => {
     if (!exam) {
       return res.status(404).json({ status: "error", message: "Exam not found" });
     }
-    if (exam.status !== "Published") {
-      return res.status(409).json({ status: "error", message: "This exam is not open for submissions." });
-    }
     if (exam.createdBy !== req.user.id) {
       return res.status(403).json({ status: "error", message: "You do not own this exam" });
     }
@@ -284,9 +274,9 @@ exports.publishExam = async (req, res) => {
 };
 
 // Published -> Completed. A closed exam stops accepting new
-// submissions (submitExam should be checked against this — see note
-// above) but remains visible to students who already took it, same
-// as Completed exams already are in getStudentExams.
+// submissions (submitExam checks exam.status !== "Published" above)
+// but remains visible to students who already took it, same as
+// Completed exams already are in getStudentExams.
 exports.closeExam = async (req, res) => {
   try {
     if (!isValidId(req.params.id)) {
@@ -296,9 +286,6 @@ exports.closeExam = async (req, res) => {
     const exam = await Exam.findById(req.params.id);
     if (!exam) {
       return res.status(404).json({ status: "error", message: "Exam not found" });
-    }
-    if (exam.status !== "Published") {
-      return res.status(409).json({ status: "error", message: "This exam is not open for submissions." });
     }
     if (exam.createdBy !== req.user.id) {
       return res.status(403).json({ status: "error", message: "You do not own this exam" });
@@ -368,9 +355,6 @@ exports.deleteExam = async (req, res) => {
     const exam = await Exam.findById(req.params.id);
     if (!exam) {
       return res.status(404).json({ status: "error", message: "Exam not found" });
-    }
-    if (exam.status !== "Published") {
-      return res.status(409).json({ status: "error", message: "This exam is not open for submissions." });
     }
     if (exam.createdBy !== req.user.id) {
       return res.status(403).json({ status: "error", message: "You do not own this exam" });
