@@ -165,6 +165,15 @@ exports.createAssignment = async (req, res) => {
       maxScore,
       createdBy: req.user.id
     });
+    const course = await Course.findById(req.params.courseId);
+    notifyUsers({
+      recipientIds: course?.enrolledStudentIds || [],
+      type: "new_assignment",
+      title: "New assignment posted",
+      message: `"${title}" has been posted to your course.`,
+      link: `/student/courses/${req.params.courseId}`,
+      context: { courseId: req.params.courseId, assignmentId: assignment._id },
+    });
     res.status(201).json({ status: "success", data: assignment });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error creating assignment: " + error.message });
