@@ -1,6 +1,6 @@
 const Admin = require("../models/Admin");
 const Unit = require("../models/Unit");
-const University = require("../models/university.model");
+const University = require("../models/University");
 const AuditLog = require("../models/auditLog.model");
 
 // ============================================================
