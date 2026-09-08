@@ -1,7 +1,7 @@
 const Admin = require("../models/Admin");
 const Unit = require("../models/Unit");
 const University = require("../models/University");
-const AuditLog = require("../models/auditLog.model");
+const AuditLog = require("../models/AuditLog");
 
 // ============================================================
 // ADMIN MANAGEMENT
