@@ -7,7 +7,6 @@ const AuditLog = require("../models/AuditLog");
 // ADMIN MANAGEMENT
 // ============================================================
 
-// Create Admin
 exports.createAdmin = async (req, res) => {
   try {
     const { name, email, universityId } = req.body;
@@ -18,9 +17,7 @@ exports.createAdmin = async (req, res) => {
 
     const existing = await Admin.findOne({ email });
     if (existing) {
-      return res
-        .status(409)
-        .json({ message: "Admin with this email already exists" });
+      return res.status(409).json({ message: "Admin with this email already exists" });
     }
 
     const admin = await Admin.create({
@@ -35,11 +32,13 @@ exports.createAdmin = async (req, res) => {
     }
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "ADMIN_CREATE",
-      adminId: req.user._id,
-      targetId: admin._id,
       targetType: "Admin",
-      changes: { name, email, universityId },
+      targetId: admin._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, email }),
     });
 
     res.status(201).json({
@@ -60,7 +59,6 @@ exports.createAdmin = async (req, res) => {
   }
 };
 
-// List Admins
 exports.listAdmins = async (req, res) => {
   try {
     const { page = 1, limit = 10, search, status, universityId } = req.query;
@@ -105,7 +103,6 @@ exports.listAdmins = async (req, res) => {
   }
 };
 
-// Update Admin
 exports.updateAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -122,11 +119,13 @@ exports.updateAdmin = async (req, res) => {
     }
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "ADMIN_UPDATE",
-      adminId: req.user._id,
-      targetId: admin._id,
       targetType: "Admin",
-      changes: { name, email, universityId, status },
+      targetId: admin._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, email, universityId, status }),
     });
 
     res.json({
@@ -147,7 +146,6 @@ exports.updateAdmin = async (req, res) => {
   }
 };
 
-// Delete Admin
 exports.deleteAdmin = async (req, res) => {
   try {
     const { id } = req.params;
@@ -159,11 +157,13 @@ exports.deleteAdmin = async (req, res) => {
     }
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "ADMIN_DELETE",
-      adminId: req.user._id,
-      targetId: admin._id,
       targetType: "Admin",
-      changes: { name: admin.name, email: admin.email },
+      targetId: admin._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name: admin.name, email: admin.email }),
     });
 
     res.json({
@@ -184,15 +184,12 @@ exports.deleteAdmin = async (req, res) => {
 // UNIT MANAGEMENT
 // ============================================================
 
-// Create Unit
 exports.createUnit = async (req, res) => {
   try {
     const { code, name, description, credits, universityId } = req.body;
 
     if (!code || !name || !credits) {
-      return res
-        .status(400)
-        .json({ message: "Code, name, and credits required" });
+      return res.status(400).json({ message: "Code, name, and credits required" });
     }
 
     const existing = await Unit.findOne({ code });
@@ -214,11 +211,13 @@ exports.createUnit = async (req, res) => {
     }
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "UNIT_CREATE",
-      adminId: req.user._id,
-      targetId: unit._id,
       targetType: "Unit",
-      changes: { code, name, credits },
+      targetId: unit._id.toString(),
+      result: "success",
+      details: JSON.stringify({ code, name, credits }),
     });
 
     res.status(201).json({
@@ -241,7 +240,6 @@ exports.createUnit = async (req, res) => {
   }
 };
 
-// List Units
 exports.listUnits = async (req, res) => {
   try {
     const { page = 1, limit = 10, search, status, universityId } = req.query;
@@ -288,7 +286,6 @@ exports.listUnits = async (req, res) => {
   }
 };
 
-// Update Unit
 exports.updateUnit = async (req, res) => {
   try {
     const { id } = req.params;
@@ -305,11 +302,13 @@ exports.updateUnit = async (req, res) => {
     }
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "UNIT_UPDATE",
-      adminId: req.user._id,
-      targetId: unit._id,
       targetType: "Unit",
-      changes: { code, name, credits, status },
+      targetId: unit._id.toString(),
+      result: "success",
+      details: JSON.stringify({ code, name, credits, status }),
     });
 
     res.json({
@@ -332,7 +331,6 @@ exports.updateUnit = async (req, res) => {
   }
 };
 
-// Delete Unit
 exports.deleteUnit = async (req, res) => {
   try {
     const { id } = req.params;
@@ -344,11 +342,13 @@ exports.deleteUnit = async (req, res) => {
     }
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "UNIT_DELETE",
-      adminId: req.user._id,
-      targetId: unit._id,
       targetType: "Unit",
-      changes: { code: unit.code, name: unit.name },
+      targetId: unit._id.toString(),
+      result: "success",
+      details: JSON.stringify({ code: unit.code, name: unit.name }),
     });
 
     res.json({
@@ -369,7 +369,6 @@ exports.deleteUnit = async (req, res) => {
 // UNIVERSITY MANAGEMENT
 // ============================================================
 
-// Create University (superadmin only)
 exports.createUniversity = async (req, res) => {
   try {
     const { name, email, country } = req.body;
@@ -392,11 +391,13 @@ exports.createUniversity = async (req, res) => {
     });
 
     await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
       action: "UNIVERSITY_CREATE",
-      adminId: req.user._id,
-      targetId: university._id,
       targetType: "University",
-      changes: { name, email, country },
+      targetId: university._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, email, country }),
     });
 
     res.status(201).json({
