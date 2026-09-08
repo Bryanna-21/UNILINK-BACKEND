@@ -1,35 +1,36 @@
-const Admin = require("../models/Admin");
+const User = require("../models/User");
 const Unit = require("../models/Unit");
 const University = require("../models/University");
 const AuditLog = require("../models/AuditLog");
 
 // ============================================================
-// ADMIN MANAGEMENT
+// ADMIN MANAGEMENT (Users with role="admin")
 // ============================================================
 
 exports.createAdmin = async (req, res) => {
   try {
-    const { name, email, universityId } = req.body;
+    const { name, email, password } = req.body;
 
-    if (!name || !email) {
-      return res.status(400).json({ message: "Name and email required" });
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email, and password required" });
     }
 
-    const existing = await Admin.findOne({ email });
+    const existing = await User.findOne({ email });
     if (existing) {
-      return res.status(409).json({ message: "Admin with this email already exists" });
+      return res.status(409).json({ message: "User with this email already exists" });
     }
 
-    const admin = await Admin.create({
+    const bcrypt = require("bcryptjs");
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const admin = await User.create({
       name,
       email,
-      universityId: universityId || null,
+      password: hashedPassword,
+      role: "admin",
       status: "active",
+      isVerified: true,
     });
-
-    if (admin.universityId) {
-      await admin.populate("universityId", "name");
-    }
 
     await AuditLog.create({
       adminId: req.user.id,
@@ -48,8 +49,7 @@ exports.createAdmin = async (req, res) => {
         id: admin._id,
         name: admin.name,
         email: admin.email,
-        universityId: admin.universityId?._id,
-        university: admin.universityId?.name,
+        role: admin.role,
         status: admin.status,
         createdAt: admin.createdAt,
       },
@@ -61,9 +61,10 @@ exports.createAdmin = async (req, res) => {
 
 exports.listAdmins = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, status, universityId } = req.query;
+    const { page = 1, limit = 10, search, status } = req.query;
 
-    const query = {};
+    const query = { role: "admin" };
+    
     if (search) {
       query.$or = [
         { name: new RegExp(search, "i") },
@@ -71,11 +72,10 @@ exports.listAdmins = async (req, res) => {
       ];
     }
     if (status) query.status = status;
-    if (universityId) query.universityId = universityId;
 
-    const total = await Admin.countDocuments(query);
-    const admins = await Admin.find(query)
-      .populate("universityId", "name")
+    const total = await User.countDocuments(query);
+    const admins = await User.find(query)
+      .select("_id name email role status createdAt")
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
@@ -86,8 +86,7 @@ exports.listAdmins = async (req, res) => {
         id: admin._id,
         name: admin.name,
         email: admin.email,
-        universityId: admin.universityId?._id,
-        university: admin.universityId?.name,
+        role: admin.role,
         status: admin.status,
         createdAt: admin.createdAt,
       })),
@@ -106,15 +105,15 @@ exports.listAdmins = async (req, res) => {
 exports.updateAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, universityId, status } = req.body;
+    const { name, email, status } = req.body;
 
-    const admin = await Admin.findByIdAndUpdate(
+    const admin = await User.findByIdAndUpdate(
       id,
-      { name, email, universityId, status },
+      { name, email, status },
       { new: true }
-    ).populate("universityId", "name");
+    ).select("_id name email role status updatedAt");
 
-    if (!admin) {
+    if (!admin || admin.role !== "admin") {
       return res.status(404).json({ message: "Admin not found" });
     }
 
@@ -125,7 +124,7 @@ exports.updateAdmin = async (req, res) => {
       targetType: "Admin",
       targetId: admin._id.toString(),
       result: "success",
-      details: JSON.stringify({ name, email, universityId, status }),
+      details: JSON.stringify({ name, email, status }),
     });
 
     res.json({
@@ -135,8 +134,7 @@ exports.updateAdmin = async (req, res) => {
         id: admin._id,
         name: admin.name,
         email: admin.email,
-        universityId: admin.universityId?._id,
-        university: admin.universityId?.name,
+        role: admin.role,
         status: admin.status,
         updatedAt: admin.updatedAt,
       },
@@ -150,9 +148,9 @@ exports.deleteAdmin = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const admin = await Admin.findByIdAndDelete(id);
+    const admin = await User.findByIdAndDelete(id);
 
-    if (!admin) {
+    if (!admin || admin.role !== "admin") {
       return res.status(404).json({ message: "Admin not found" });
     }
 
