@@ -2,6 +2,8 @@ const mongoose = require("mongoose");
 const Exam = require("../models/Exam");
 const ExamSubmission = require("../models/ExamSubmission");
 const ExamResult = require("../models/ExamResult");
+const Course = require("../models/Course");
+const notifyUsers = require("../middleware/notifyUsers.middleware");
 const { isLecturer } = require("../utils/roles");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -266,6 +268,16 @@ exports.publishExam = async (req, res) => {
 
     exam.status = "Published";
     await exam.save();
+
+    const examCourse = await Course.findById(exam.courseId);
+    notifyUsers({
+      recipientIds: examCourse?.enrolledStudentIds || [],
+      type: "exam_published",
+      title: "New exam published",
+      message: `"${exam.title}" is now available.`,
+      link: `/student/exams/${exam._id}`,
+      context: { courseId: exam.courseId, examId: exam._id },
+    });
 
     res.status(200).json({ status: "success", data: exam });
   } catch (error) {
