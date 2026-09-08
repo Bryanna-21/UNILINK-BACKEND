@@ -12,7 +12,7 @@ const {
   createUniversity,
 } = require("../controllers/admin.controller");
 const { requireSuperadmin } = require("../middleware/roleGuard");
-const authenticate = require("../middleware/auth"); // Assuming you have auth middleware
+const authenticate = require("../middleware/auth.middleware"); // Assuming you have auth middleware
 
 // ============================================================
 // ADMIN MANAGEMENT - Superadmin Only
