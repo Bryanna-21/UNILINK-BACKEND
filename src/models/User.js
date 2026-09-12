@@ -12,6 +12,14 @@ const userSchema = new mongoose.Schema({
   // twoFactorEnabled is opt-in, off by default, toggled from Settings.
   isVerified: { type: Boolean, default: false },
   twoFactorEnabled: { type: Boolean, default: false },
+  // Profile picture and cover photo. Both are Cloudinary secure URLs,
+  // same pattern as Portfolio's resumeUrl/certificate fileUrl — never
+  // store the raw upload, only the hosted URL. Optional: a new user
+  // has neither until they explicitly upload one.
+  avatarUrl: { type: String, default: null },
+  coverUrl: { type: String, default: null },
+  bio: { type: String, default: "" },
+  phone: { type: String, default: "" },
   // Holds the new (already-hashed) password while a password-change
   // request is awaiting OTP confirmation. Set in
   // /request-password-change, promoted to `password` and cleared in

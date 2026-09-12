@@ -109,3 +109,62 @@ exports.getUserSummary = async (req, res) => {
     res.status(500).json({ status: "error", message: "Error fetching user summary: " + error.message });
   }
 };
+
+// Core identity fields (name, bio, phone) live on User, not Portfolio
+// — Portfolio is deliberately scoped to career/academic extension
+// data per its own header comment (skills, resume, projects), while
+// this is "who you are," the same category as name/email already on
+// User. Deliberately whitelisted rather than `req.body` spread
+// directly onto the document: email, password, role, status, and the
+// OTP/2FA fields must never be settable through this route, even if
+// a client accidentally or maliciously includes them in the body.
+exports.updateMyProfile = async (req, res) => {
+  try {
+    const { name, bio, phone } = req.body;
+    const update = {};
+    if (name !== undefined) update.name = name;
+    if (bio !== undefined) update.bio = bio;
+    if (phone !== undefined) update.phone = phone;
+
+    const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true }).select(
+      "name email role universityId bio phone avatarUrl coverUrl"
+    );
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    res.status(200).json({ status: "success", data: user });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error updating profile: " + error.message });
+  }
+};
+
+// Avatar and cover share this same shape (accept one image, upload to
+// Cloudinary, save the resulting URL on User) so they're implemented
+// once and parameterized by field name and Cloudinary folder, rather
+// than duplicating the same five lines twice.
+const uploadProfileImage = (fieldName, cloudinaryFolder) => async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ status: "error", message: "No file provided" });
+    }
+    const result = await uploadBufferToCloudinary(req.file.buffer, cloudinaryFolder, "image");
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: { [fieldName]: result.secure_url } },
+      { new: true }
+    ).select("name email role universityId bio phone avatarUrl coverUrl");
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    // Mobile's edit.tsx reads result.data.url from this response —
+    // returning both the full user object AND a top-level url field
+    // covers that expectation without forcing a second round-trip,
+    // while still giving any other caller the complete updated user.
+    res.status(200).json({ status: "success", data: { ...user.toObject(), url: result.secure_url } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: `Error uploading ${fieldName}: ` + error.message });
+  }
+};
+
+exports.uploadAvatar = uploadProfileImage("avatarUrl", "unilink/avatars");
+exports.uploadCover = uploadProfileImage("coverUrl", "unilink/covers");
