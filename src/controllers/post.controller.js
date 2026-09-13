@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Post = require("../models/Post");
 const User = require("../models/User");
+const Comment = require("../models/Comment");
 const {
   uploadBufferToCloudinary,
   cloudinary,
@@ -307,5 +308,69 @@ exports.likePost = async (req, res) => {
       status: "error",
       message: "Error liking post: " + error.message,
     });
+  }
+};
+
+// Comments were previously modeled (Comment.js) but had no routes at
+// all — this is new backend work, not a wiring job. Mirrors
+// createPost/getFeed's own validation and response style. Reuses the
+// same manual-join pattern as attachAuthorNames above rather than a
+// separate approach, since comment.userId is the same plain string
+// convention as post.userId.
+exports.getComments = async (req, res) => {
+  try {
+    const { id: postId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      return res.status(400).json({ status: "error", message: "Invalid post id" });
+    }
+
+    const comments = await Comment.find({ postId }).sort({ createdAt: 1 }).lean();
+
+    const userIds = [...new Set(comments.map((c) => String(c.userId)))];
+    const users = await User.find({ _id: { $in: userIds } }).select("_id name").lean();
+    const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+
+    const withAuthors = comments.map((c) => ({
+      ...c,
+      authorName: nameById.get(String(c.userId)) || "Unknown user",
+    }));
+
+    return res.status(200).json({ status: "success", data: withAuthors });
+  } catch (error) {
+    console.error("Get comments error:", error);
+    return res.status(500).json({ status: "error", message: "Error fetching comments: " + error.message });
+  }
+};
+
+exports.addComment = async (req, res) => {
+  try {
+    const { id: postId } = req.params;
+    const userId = getUserId(req);
+
+    if (!mongoose.Types.ObjectId.isValid(postId)) {
+      return res.status(400).json({ status: "error", message: "Invalid post id" });
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+
+    const content = typeof req.body.content === "string" ? req.body.content.trim() : "";
+    if (!content) {
+      return res.status(400).json({ status: "error", message: "Comment content is required" });
+    }
+
+    const comment = await Comment.create({ postId, userId, content });
+
+    // Kept minimal on purpose: no author name attached to the create
+    // response, since the caller already knows their own name — the
+    // getComments list above is where authorName actually matters,
+    // for everyone else's comments.
+    return res.status(201).json({ status: "success", data: comment });
+  } catch (error) {
+    console.error("Add comment error:", error);
+    return res.status(500).json({ status: "error", message: "Error adding comment: " + error.message });
   }
 };

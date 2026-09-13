@@ -21,6 +21,11 @@ router.post("/", auth, uploadPostMedia, ctrl.createPost);
 // Like / unlike a post
 router.post("/like/:id", auth, ctrl.likePost);
 
+// Comments — new backend work, the Comment model existed but had no
+// routes at all.
+router.get("/:id/comments", auth, ctrl.getComments);
+router.post("/:id/comments", auth, ctrl.addComment);
+
 // ============================================================
 // BACKWARDS-COMPATIBLE ALIASES
 // ============================================================

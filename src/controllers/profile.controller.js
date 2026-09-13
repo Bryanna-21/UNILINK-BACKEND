@@ -89,22 +89,29 @@ exports.getAchievementsForUser = async (req, res) => {
 };
 
 // Minimal, non-sensitive user lookup — used to resolve a display name
-// for a conversation partner in Messages. Deliberately selects only
-// name/role: never email, password, universityId, or status. Any
-// authenticated user can look up any other user's name this way,
-// which is the same exposure level as seeing someone's name on a
-// post or in a shared course roster — not a new privacy surface,
-// just enough to avoid showing raw ObjectIds in the messages UI.
+// for a conversation partner in Messages, and now also the public
+// profile view reached by tapping a post author's or commenter's
+// name. Selects name/role/avatarUrl/bio — never email, password,
+// universityId, or status. avatarUrl and bio were added tonight
+// alongside the new public-profile screen; both are the same
+// exposure tier as name itself (already visible on every post) and
+// were already user-controlled, public-facing fields the user chose
+// to set via Edit Profile — not a new privacy surface. Any
+// authenticated user can look up this same information about any
+// other user, which is the same exposure level as seeing someone's
+// name and avatar on a post or in a shared course roster.
 exports.getUserSummary = async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.userId)) {
       return res.status(400).json({ status: "error", message: "Invalid user id" });
     }
-    const user = await User.findById(req.params.userId).select("name role");
+    const user = await User.findById(req.params.userId).select("name role avatarUrl bio");
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
-    res.status(200).json({ status: "success", data: { _id: user._id, name: user.name, role: user.role } });
+    res
+      .status(200)
+      .json({ status: "success", data: { _id: user._id, name: user.name, role: user.role, avatarUrl: user.avatarUrl, bio: user.bio } });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching user summary: " + error.message });
   }
