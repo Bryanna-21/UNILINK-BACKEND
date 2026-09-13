@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Post = require("../models/Post");
 const User = require("../models/User");
 const Comment = require("../models/Comment");
+const Like = require("../models/Like");
 const {
   uploadBufferToCloudinary,
   cloudinary,
@@ -145,6 +146,8 @@ exports.createPost = async (req, res) => {
 
 exports.getFeed = async (req, res) => {
   try {
+    const userId = getUserId(req);
+
     const posts = await Post.find({})
       .sort({ score: -1, createdAt: -1 })
       .limit(50)
@@ -152,10 +155,23 @@ exports.getFeed = async (req, res) => {
 
     const postsWithAuthors = await attachAuthorNames(posts);
 
+    // One query for every post this user has liked among the ones
+    // just fetched, not one query per post — same batching principle
+    // as attachAuthorNames above, applied to like status instead of
+    // author names.
+    const postIds = postsWithAuthors.map((p) => String(p._id));
+    const userLikes = await Like.find({ userId, postId: { $in: postIds } }).select("postId").lean();
+    const likedPostIds = new Set(userLikes.map((l) => l.postId));
+
+    const postsWithLikeStatus = postsWithAuthors.map((p) => ({
+      ...p,
+      liked: likedPostIds.has(String(p._id)),
+    }));
+
     return res.status(200).json({
       status: "success",
-      count: postsWithAuthors.length,
-      data: postsWithAuthors,
+      count: postsWithLikeStatus.length,
+      data: postsWithLikeStatus,
     });
   } catch (error) {
     console.error("Get feed error:", error);
@@ -170,6 +186,7 @@ exports.getFeed = async (req, res) => {
 exports.getPostById = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = getUserId(req);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -188,10 +205,11 @@ exports.getPostById = async (req, res) => {
     }
 
     const [postWithAuthor] = await attachAuthorNames([post]);
+    const existingLike = await Like.findOne({ userId, postId: id }).select("_id").lean();
 
     return res.status(200).json({
       status: "success",
-      data: postWithAuthor,
+      data: { ...postWithAuthor, liked: !!existingLike },
     });
   } catch (error) {
     console.error("Get post error:", error);
@@ -272,9 +290,24 @@ exports.deletePost = async (req, res) => {
   }
 };
 
+// Real toggle now, not a blind increment. Previously this endpoint
+// incremented post.likes on every single call with no per-user
+// tracking at all — no way to know if a user had already liked a
+// post, no way to unlike, and repeated taps could inflate the count
+// indefinitely. Fixed using the same pattern as tonight's Follow
+// system: a separate Like join record per (user, post), with a
+// compound unique index (on the Like model) preventing a duplicate
+// like from ever being created in the first place. This function
+// now toggles: if a Like already exists for this user+post, it
+// removes it and decrements; otherwise it creates one and increments.
+// post.likes remains a denominated counter for fast feed rendering —
+// it isn't recomputed by counting Like documents on every read, it's
+// kept in sync incrementally on each toggle, same tradeoff Post's own
+// commentsCount field already makes for comments.
 exports.likePost = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = getUserId(req);
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
@@ -292,15 +325,35 @@ exports.likePost = async (req, res) => {
       });
     }
 
+    const existingLike = await Like.findOne({ userId, postId: id });
+
+    if (existingLike) {
+      await Like.deleteOne({ _id: existingLike._id });
+      post.likes = Math.max(0, post.likes - 1);
+      post.score = Math.max(0, post.score - 2);
+      await post.save();
+      return res.status(200).json({ status: "success", data: { post, liked: false } });
+    }
+
+    try {
+      await Like.create({ userId, postId: id });
+    } catch (err) {
+      // Race condition guard: two rapid taps could both pass the
+      // findOne check above before either write lands. The unique
+      // index on Like is the real safeguard — if it rejects a
+      // duplicate here, treat it as "already liked" rather than a
+      // 500, since that's what actually happened.
+      if (err.code === 11000) {
+        return res.status(409).json({ status: "error", message: "Already liked" });
+      }
+      throw err;
+    }
+
     post.likes += 1;
     post.score += 2;
-
     await post.save();
 
-    return res.status(200).json({
-      status: "success",
-      data: post,
-    });
+    return res.status(200).json({ status: "success", data: { post, liked: true } });
   } catch (error) {
     console.error("Like post error:", error);
 
@@ -308,6 +361,28 @@ exports.likePost = async (req, res) => {
       status: "error",
       message: "Error liking post: " + error.message,
     });
+  }
+};
+
+// Whether the CURRENT authenticated user has liked :id — same shape
+// as Follow's getFollowStatus, needed so the feed can render the
+// like button's correct initial state (filled heart vs outline)
+// rather than always starting from "not liked" regardless of
+// history.
+exports.getLikeStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = getUserId(req);
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: "error", message: "Invalid post id" });
+    }
+
+    const existing = await Like.findOne({ userId, postId: id }).select("_id").lean();
+    return res.status(200).json({ status: "success", data: { liked: !!existing } });
+  } catch (error) {
+    console.error("Get like status error:", error);
+    return res.status(500).json({ status: "error", message: "Error checking like status: " + error.message });
   }
 };
 
