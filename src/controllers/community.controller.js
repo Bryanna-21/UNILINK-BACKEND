@@ -47,10 +47,23 @@ exports.addComment = async (req, res) => {
 
 // ---------- Discussion (per course) ----------
 
+// Fixed alongside tonight's accessibility pass: same "raw userId, no
+// populated name" gap Comments had before being fixed earlier
+// tonight. Same batch-lookup pattern, not a new approach.
 exports.getDiscussionForCourse = async (req, res) => {
   try {
-    const posts = await Discussion.find({ courseId: req.params.courseId }).sort({ createdAt: 1 });
-    res.status(200).json({ status: "success", count: posts.length, data: posts });
+    const posts = await Discussion.find({ courseId: req.params.courseId }).sort({ createdAt: 1 }).lean();
+
+    const userIds = [...new Set(posts.map((p) => String(p.userId)))];
+    const users = await User.find({ _id: { $in: userIds } }).select("_id name").lean();
+    const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+
+    const withAuthors = posts.map((p) => ({
+      ...p,
+      authorName: nameById.get(String(p.userId)) || "Unknown user",
+    }));
+
+    res.status(200).json({ status: "success", count: withAuthors.length, data: withAuthors });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching discussion: " + error.message });
   }
