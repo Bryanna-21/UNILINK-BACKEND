@@ -2,6 +2,74 @@ const User = require("../models/User");
 const Unit = require("../models/Unit");
 const University = require("../models/University");
 const AuditLog = require("../models/AuditLog");
+const Notification = require("../models/Notification");
+
+// ============================================================
+// ADMIN NOTIFICATIONS
+// ============================================================
+// Read side for the Notification model / notifyAdmins.middleware.js.
+// The write side (creating these rows, one per admin, plus a live
+// socket push) was already fully built — see notifyAdmins.middleware.js,
+// called today only from emergency.controller.js on new reports. This
+// REST route was the missing piece: notificationService.js on the
+// frontend already called it, but nothing on the backend answered.
+
+exports.getAdminNotifications = async (req, res) => {
+  try {
+    const notifications = await Notification.find({ recipientId: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(50);
+
+    const unreadCount = await Notification.countDocuments({
+      recipientId: req.user.id,
+      read: false,
+    });
+
+    res.json({
+      status: "success",
+      data: notifications.map((n) => ({
+        id: n._id,
+        type: n.type,
+        title: n.title,
+        message: n.message,
+        link: n.link,
+        read: n.read,
+        createdAt: n.createdAt,
+      })),
+      unreadCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.markAdminNotificationRead = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const notification = await Notification.findOne({
+      _id: id,
+      recipientId: req.user.id,
+    });
+
+    if (!notification) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    notification.read = true;
+    await notification.save();
+
+    res.json({
+      status: "success",
+      data: {
+        id: notification._id,
+        read: notification.read,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
 // ============================================================
 // ADMIN MANAGEMENT (Users with role="admin")
