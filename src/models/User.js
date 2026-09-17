@@ -6,6 +6,13 @@ const userSchema = new mongoose.Schema({
   universityId: String,
   role: { type: String, default: "student" },
   status: { type: String, enum: ["active", "suspended"], default: "active" },
+  // Student admission/registration number. Optional and student-only
+  // in practice (lecturers/admins have no use for it) but not
+  // enforced at the schema level, same laxness as other optional
+  // profile fields here (bio, phone). Added for exam-grading views
+  // (ViewSubmission.js) that need to identify a student beyond name/
+  // email; not used for authentication or lookups anywhere.
+  admissionNumber: { type: String, default: "" },
   // New fields for OTP verification and optional login 2FA.
   // isVerified starts false — an account can't log in at all until
   // its signup OTP is confirmed (see auth.routes.js's /login check).

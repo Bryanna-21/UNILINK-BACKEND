@@ -17,6 +17,9 @@ router.post("/:id/submit", auth, ctrl.submitExam);
 // not here — auth.middleware.js only verifies the token and session
 // validity, it doesn't gate by role.
 router.get("/lecturer", auth, ctrl.getLecturerExams);
+router.get("/submissions", auth, ctrl.getLecturerExamSubmissions);
+router.get("/submissions/:submissionId", auth, ctrl.getExamSubmissionById);
+router.post("/submissions/:submissionId/grade", auth, ctrl.gradeExamSubmission);
 router.post("/", auth, ctrl.createExam);
 router.put("/:id", auth, ctrl.updateExam);
 router.patch("/:id/publish", auth, ctrl.publishExam);

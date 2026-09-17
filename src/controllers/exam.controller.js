@@ -3,6 +3,7 @@ const Exam = require("../models/Exam");
 const ExamSubmission = require("../models/ExamSubmission");
 const ExamResult = require("../models/ExamResult");
 const Course = require("../models/Course");
+const User = require("../models/User");
 const notifyUsers = require("../middleware/notifyUsers.middleware");
 const { isLecturer } = require("../utils/roles");
 
@@ -395,5 +396,210 @@ exports.getLecturerExams = async (req, res) => {
     res.status(200).json({ status: "success", count: exams.length, data: exams });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching lecturer exams: " + error.message });
+  }
+};
+
+// ============================================================
+// GRADING
+// ============================================================
+// Deliberately deferred at submit time (see submitExam's comment) —
+// this is that later work. All three functions below are scoped to
+// exams the requesting lecturer created; there's no course-level
+// indirection needed since Exam.createdBy already is the lecturer's
+// own userId directly.
+
+// Flat list of every submission across every exam this lecturer
+// owns, newest first — GradeSubmissions.js calls this with no examId
+// (its own per-exam filtering, if any, happens client-side), so this
+// does not take one either. Joins in student name/email/
+// admissionNumber and the parent exam's title, since SubmissionCard.js
+// reads both nested under submission.student / submission.exam.
+exports.getLecturerExamSubmissions = async (req, res) => {
+  try {
+    if (!isLecturer(req.user.role)) {
+      return res.status(403).json({ status: "error", message: "Only lecturers can view this list" });
+    }
+
+    const exams = await Exam.find({ createdBy: req.user.id }).select("_id title");
+    const examIds = exams.map((e) => e._id.toString());
+    const examById = new Map(exams.map((e) => [e._id.toString(), e]));
+
+    const submissions = await ExamSubmission.find({ examId: { $in: examIds } }).sort({ submittedAt: -1 });
+    const studentIds = [...new Set(submissions.map((s) => s.studentId))];
+    const students = await User.find({ _id: { $in: studentIds } }).select(
+      "name email admissionNumber"
+    );
+    const studentById = new Map(students.map((u) => [u._id.toString(), u]));
+
+    const results = await ExamResult.find({ examId: { $in: examIds } });
+    const resultBySubmission = new Map(results.map((r) => [r.submissionId, r]));
+
+    res.status(200).json({
+      status: "success",
+      count: submissions.length,
+      data: submissions.map((sub) => {
+        const result = resultBySubmission.get(sub._id.toString());
+        const student = studentById.get(sub.studentId);
+        const exam = examById.get(sub.examId);
+        return {
+          _id: sub._id,
+          student: student
+            ? { name: student.name, email: student.email, admissionNumber: student.admissionNumber }
+            : null,
+          exam: exam ? { title: exam.title } : null,
+          score: result?.score ?? null,
+          totalMarks: result?.totalMarks ?? null,
+          status: result?.status || "Pending",
+          submittedAt: sub.submittedAt,
+        };
+      }),
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching submissions: " + error.message });
+  }
+};
+
+// One submission in full: each answer joined with its question's
+// text/maxMarks from the parent Exam (ExamSubmission itself only
+// stores questionId + the raw answer text), plus student and course
+// info, plus any marks already awarded from a previous grading pass
+// (so re-opening a graded submission shows existing marks, not blanks).
+exports.getExamSubmissionById = async (req, res) => {
+  try {
+    if (!isLecturer(req.user.role)) {
+      return res.status(403).json({ status: "error", message: "Only lecturers can view this" });
+    }
+    if (!isValidId(req.params.submissionId)) {
+      return res.status(400).json({ status: "error", message: "Invalid submission id" });
+    }
+
+    const submission = await ExamSubmission.findById(req.params.submissionId);
+    if (!submission) {
+      return res.status(404).json({ status: "error", message: "Submission not found" });
+    }
+
+    const exam = await Exam.findById(submission.examId);
+    if (!exam) {
+      return res.status(404).json({ status: "error", message: "Parent exam not found" });
+    }
+    if (exam.createdBy !== req.user.id) {
+      return res.status(403).json({ status: "error", message: "You do not own this exam" });
+    }
+
+    const student = await User.findById(submission.studentId).select("name email admissionNumber");
+    const course = await Course.findById(exam.courseId).select("name");
+    const result = await ExamResult.findOne({ submissionId: submission._id.toString() });
+
+    const questionById = new Map(exam.questions.map((q) => [q._id.toString(), q]));
+    const markByQuestion = new Map(
+      (result?.questionMarks || []).map((m) => [m.questionId, m.marksAwarded])
+    );
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        _id: submission._id,
+        student: student
+          ? { name: student.name, email: student.email, admissionNumber: student.admissionNumber, course: course?.name || null }
+          : null,
+        exam: { title: exam.title, duration: exam.duration },
+        submittedAt: submission.submittedAt,
+        feedback: result?.feedback || "",
+        status: result?.status || "Pending",
+        totalMarks: result?.totalMarks ?? null,
+        score: result?.score ?? null,
+        answers: submission.answers.map((a) => {
+          const question = questionById.get(a.questionId);
+          return {
+            questionId: a.questionId,
+            question: question?.text || "(question no longer exists on this exam)",
+            maxMarks: question?.marks ?? 0,
+            response: a.answer,
+            marks: markByQuestion.get(a.questionId) ?? 0,
+          };
+        }),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching submission: " + error.message });
+  }
+};
+
+// Records/updates per-question marks for one submission. score is
+// the sum of marksAwarded across all questions, clamped so a lecturer
+// can't accidentally award more than a question's own max (the
+// frontend's number input already caps at maxMarks, but that's
+// client-side only and not trustworthy on its own). status is set
+// against exam.passMark as a percentage of totalMarks — the first
+// place in the codebase this comparison is made (see roles.js's note
+// on centralizing repeated logic; this is new logic, not a copy).
+exports.gradeExamSubmission = async (req, res) => {
+  try {
+    if (!isLecturer(req.user.role)) {
+      return res.status(403).json({ status: "error", message: "Only lecturers can grade submissions" });
+    }
+    if (!isValidId(req.params.submissionId)) {
+      return res.status(400).json({ status: "error", message: "Invalid submission id" });
+    }
+
+    const { marks, feedback } = req.body;
+    if (!marks || typeof marks !== "object") {
+      return res.status(400).json({ status: "error", message: "marks must be an object of questionId -> awarded marks" });
+    }
+
+    const submission = await ExamSubmission.findById(req.params.submissionId);
+    if (!submission) {
+      return res.status(404).json({ status: "error", message: "Submission not found" });
+    }
+
+    const exam = await Exam.findById(submission.examId);
+    if (!exam) {
+      return res.status(404).json({ status: "error", message: "Parent exam not found" });
+    }
+    if (exam.createdBy !== req.user.id) {
+      return res.status(403).json({ status: "error", message: "You do not own this exam" });
+    }
+
+    const questionById = new Map(exam.questions.map((q) => [q._id.toString(), q]));
+
+    const questionMarks = [];
+    let score = 0;
+    for (const [questionId, rawValue] of Object.entries(marks)) {
+      const question = questionById.get(questionId);
+      if (!question) continue; // silently skip marks for a question no longer on the exam
+      const maxForQuestion = question.marks || 0;
+      const awarded = Math.max(0, Math.min(Number(rawValue) || 0, maxForQuestion));
+      questionMarks.push({ questionId, marksAwarded: awarded });
+      score += awarded;
+    }
+
+    const result = await ExamResult.findOne({ submissionId: submission._id.toString() });
+    if (!result) {
+      return res.status(404).json({ status: "error", message: "No result record found for this submission" });
+    }
+
+    const percentage = result.totalMarks > 0 ? (score / result.totalMarks) * 100 : 0;
+
+    result.questionMarks = questionMarks;
+    result.score = score;
+    result.status = percentage >= exam.passMark ? "Passed" : "Failed";
+    result.feedback = feedback || "";
+    result.gradedBy = req.user.id;
+    result.gradedAt = new Date();
+    await result.save();
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        submissionId: submission._id,
+        score: result.score,
+        totalMarks: result.totalMarks,
+        status: result.status,
+        feedback: result.feedback,
+        gradedAt: result.gradedAt,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error grading submission: " + error.message });
   }
 };
