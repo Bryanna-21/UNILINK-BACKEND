@@ -12,9 +12,25 @@ const {
   createUniversity,
   getAdminNotifications,
   markAdminNotificationRead,
+  listUsers,
+  getDashboardStats,
 } = require("../controllers/admin.controller");
 const { requireSuperadmin, requireAdminOrSuperadmin } = require("../middleware/roleGuard");
 const authenticate = require("../middleware/auth.middleware"); // Assuming you have auth middleware
+
+// ============================================================
+// USER DIRECTORY / DASHBOARD - Admin or Superadmin
+// ============================================================
+// Same reasoning as notifications above: browsing users and viewing
+// dashboard counts are ordinary admin actions, not superadmin-only
+// ones like creating another admin or a university.
+
+// GET /api/admin/users - Every user, any role, with optional
+// ?search= and ?role= filters
+router.get("/users", authenticate, requireAdminOrSuperadmin, listUsers);
+
+// GET /api/admin/dashboard-stats
+router.get("/dashboard-stats", authenticate, requireAdminOrSuperadmin, getDashboardStats);
 
 // ============================================================
 // ADMIN NOTIFICATIONS - Admin or Superadmin

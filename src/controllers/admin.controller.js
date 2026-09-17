@@ -72,6 +72,88 @@ exports.markAdminNotificationRead = async (req, res) => {
 };
 
 // ============================================================
+// USER MANAGEMENT (all roles — students, lecturers, admins)
+// ============================================================
+// Distinct from listAdmins below: that one is hardcoded to
+// role: "admin" for the superadmin-only admin-management screen.
+// This is the general directory Admin/Users.js on the web actually
+// wants — every user regardless of role — which had no matching
+// route at all (the page ran entirely on hardcoded demo data, per
+// its own comment: "Replace later with: adminService.getUsers()").
+// Gated requireAdminOrSuperadmin, not requireSuperadmin, since
+// browsing the user directory is ordinary admin work, not a
+// superadmin-only action like creating other admins.
+
+exports.listUsers = async (req, res) => {
+  try {
+    const { search, role } = req.query;
+
+    const query = {};
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, "i") },
+        { email: new RegExp(search, "i") },
+      ];
+    }
+    if (role) query.role = role;
+
+    const users = await User.find(query)
+      .select("name email role status universityId createdAt")
+      .sort({ createdAt: -1 })
+      .limit(200); // no pagination UI on this page yet — a hard cap keeps one call bounded until it's added
+
+    const universityIds = [...new Set(users.map((u) => u.universityId).filter(Boolean))];
+    const universities = await University.find({ _id: { $in: universityIds } }).select("name");
+    const universityById = new Map(universities.map((u) => [u._id.toString(), u.name]));
+
+    res.json({
+      status: "success",
+      count: users.length,
+      data: users.map((u) => ({
+        id: u._id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        university: universityById.get(u.universityId) || null,
+        status: u.status,
+        createdAt: u.createdAt,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// DASHBOARD STATS
+// ============================================================
+// Admin/Dashboard.js was fully static — three cards with no numbers
+// behind any of them at all. Only "Total Users" maps to something
+// that actually exists: there is no post-reporting/flagging system
+// anywhere in this backend (postService.js on the frontend has a
+// matching dead reportPost function calling a route that was never
+// built), and no single "Community" model to count — clubs, study
+// groups, polls, and announcements are each their own collection
+// under community.controller.js with no unifying concept between
+// them. Returning null for both rather than inventing a number or
+// a definition neither side of the codebase has ever agreed on.
+exports.getDashboardStats = async (req, res) => {
+  try {
+    const totalUsers = await User.countDocuments({});
+    res.json({
+      status: "success",
+      data: {
+        totalUsers,
+        totalCommunities: null, // no single "community" concept exists yet to count
+        reportedPosts: null, // no post-reporting/flagging system exists yet
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
 // ADMIN MANAGEMENT (Users with role="admin")
 // ============================================================
 
