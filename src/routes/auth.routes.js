@@ -41,6 +41,30 @@ const userResponseShape = (user) => ({
   universityId: user.universityId,
 });
 
+// GET /api/auth/me — returns the current user's own profile fields.
+// Three separate frontend call sites (Profile.js, EditProfile.js,
+// AuthContext.refreshUser) already assumed this route existed; it
+// never did. Adding it here rather than routing all three at
+// /api/profile/me, since that route is PUT-only (update, not fetch)
+// and returns the same shape updateMyProfile already selects.
+router.get("/me", authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select(
+      "name email role universityId bio phone avatarUrl coverUrl"
+    );
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    // id included explicitly: several components (PostCard, Polls,
+    // Clubs, StudyGroups, CourseDetail) compare user.id against
+    // author/member/voter arrays — a refreshUser() call that dropped
+    // it would silently break ownership checks app-wide.
+    res.status(200).json({ status: "success", user: { id: user._id, ...user.toObject() } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching profile: " + error.message });
+  }
+});
+
 // Register route
 router.post("/register", async (req, res) => {
   try {
