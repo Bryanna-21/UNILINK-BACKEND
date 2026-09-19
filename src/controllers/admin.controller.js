@@ -257,15 +257,21 @@ exports.updateAdmin = async (req, res) => {
     const { id } = req.params;
     const { name, email, status } = req.body;
 
+    // Verify BEFORE modifying, not after: findByIdAndUpdate used to
+    // run first and only check admin.role on the (already-updated)
+    // result, meaning a wrong id could silently rename/deactivate a
+    // student, lecturer, or superadmin before the role check ever
+    // fired. Same fix applied to deleteAdmin below.
+    const existing = await User.findById(id);
+    if (!existing || existing.role !== "admin") {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
     const admin = await User.findByIdAndUpdate(
       id,
       { name, email, status },
       { new: true }
     ).select("_id name email role status updatedAt");
-
-    if (!admin || admin.role !== "admin") {
-      return res.status(404).json({ message: "Admin not found" });
-    }
 
     await AuditLog.create({
       adminId: req.user.id,
@@ -298,11 +304,18 @@ exports.deleteAdmin = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const admin = await User.findByIdAndDelete(id);
-
-    if (!admin || admin.role !== "admin") {
+    // Verify BEFORE deleting: findByIdAndDelete used to run first and
+    // only check role on the already-deleted document, meaning a
+    // wrong id would permanently delete a student, lecturer, or
+    // superadmin, then report "Admin not found" as if nothing had
+    // happened. The account was gone either way — the error message
+    // just lied about it.
+    const existing = await User.findById(id);
+    if (!existing || existing.role !== "admin") {
       return res.status(404).json({ message: "Admin not found" });
     }
+
+    const admin = await User.findByIdAndDelete(id);
 
     await AuditLog.create({
       adminId: req.user.id,
