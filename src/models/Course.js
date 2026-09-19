@@ -7,6 +7,12 @@ const courseSchema = new mongoose.Schema({
   universityId: String,
   lecturerId: String,
   enrolledStudentIds: { type: [String], default: [] },
+  // References into the global Unit catalog (models/Unit.js), which
+  // is superadmin-managed (see admin.controller.js's createUnit).
+  // This course does not own or create Units — it only records which
+  // existing catalog units it covers. See course.controller.js's
+  // attachUnit for how entries get added here.
+  unitIds: { type: [String], default: [] },
   createdAt: { type: Date, default: Date.now }
 });
 

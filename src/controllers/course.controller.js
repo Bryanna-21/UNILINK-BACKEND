@@ -93,32 +93,79 @@ exports.enrollInCourse = async (req, res) => {
 
 exports.getUnitsForCourse = async (req, res) => {
   try {
-    const units = await Unit.find({ courseId: req.params.courseId }).sort({ order: 1 });
+    const course = await Course.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ status: "error", message: "Course not found" });
+    }
+    // Units are a global catalog (see models/Unit.js) — this course
+    // only references which ones it covers via unitIds, so the real
+    // lookup is Unit.find on those referenced ids, not a courseId
+    // field on Unit itself (Unit has no such field).
+    const units = await Unit.find({ _id: { $in: course.unitIds || [] } }).sort({ code: 1 });
     res.status(200).json({ status: "success", count: units.length, data: units });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching units: " + error.message });
   }
 };
 
-exports.createUnit = async (req, res) => {
+// Was createUnit — renamed because that's not what this does or
+// should do. Units are a superadmin-managed global catalog (see
+// admin.controller.js's createUnit, the only legitimate place a Unit
+// document is created); this endpoint attaches an existing catalog
+// unit to a course, it does not create a new Unit. The previous
+// version called Unit.create({courseId, title, description, order})
+// against a schema with none of those fields (code/name/credits are
+// the real required fields) — every call would have thrown a
+// Mongoose validation error.
+exports.attachUnit = async (req, res) => {
   try {
     if (req.user.role !== "lecturer" && req.user.role !== "admin") {
-      return res.status(403).json({ status: "error", message: "Only lecturers or admins can create units" });
+      return res.status(403).json({ status: "error", message: "Only lecturers or admins can attach units to a course" });
     }
-    const { title, description, order } = req.body;
-    if (!title) {
-      return res.status(400).json({ status: "error", message: "title is required" });
+    if (!isValidId(req.params.courseId)) {
+      return res.status(400).json({ status: "error", message: "Invalid course id" });
     }
-    const unit = await Unit.create({ courseId: req.params.courseId, title, description, order });
-    res.status(201).json({ status: "success", data: unit });
+    const { unitId } = req.body;
+    if (!unitId || !isValidId(unitId)) {
+      return res.status(400).json({ status: "error", message: "A valid unitId is required" });
+    }
+
+    const course = await Course.findById(req.params.courseId);
+    if (!course) {
+      return res.status(404).json({ status: "error", message: "Course not found" });
+    }
+    const unit = await Unit.findById(unitId);
+    if (!unit) {
+      return res.status(404).json({ status: "error", message: "Unit not found" });
+    }
+
+    if (!course.unitIds.includes(unitId)) {
+      course.unitIds.push(unitId);
+      await course.save();
+    }
+
+    res.status(200).json({ status: "success", data: course });
   } catch (error) {
-    if (error.code === 11000) {
-      return res.status(409).json({
-        status: "error",
-        message: "A unit with this title already exists in this course.",
-      });
+    res.status(500).json({ status: "error", message: "Error attaching unit: " + error.message });
+  }
+};
+
+// Lecturer/admin-facing catalog browse, for the "attach a unit to my
+// course" flow. GET /admin/units is superadmin-only (create/edit/
+// delete of the catalog itself are rightly locked down), which meant
+// a lecturer had no way to see what units exist to attach one — this
+// is a narrower, read-only, active-units-only view, deliberately
+// simpler than listUnits (no pagination/search, since browsing a few
+// dozen active units to pick one doesn't need it).
+exports.getUnitCatalog = async (req, res) => {
+  try {
+    if (req.user.role !== "lecturer" && req.user.role !== "admin") {
+      return res.status(403).json({ status: "error", message: "Only lecturers or admins can browse the unit catalog" });
     }
-    res.status(500).json({ status: "error", message: "Error creating unit: " + error.message });
+    const units = await Unit.find({ status: "active" }).select("code name credits").sort({ code: 1 });
+    res.status(200).json({ status: "success", data: units });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching unit catalog: " + error.message });
   }
 };
 
@@ -404,6 +451,13 @@ exports.getMyResultForCat = async (req, res) => {
 // title is low-sensitivity, a list of real names is not, so this
 // endpoint checks membership even though its neighbor doesn't.
 //
+// Access: an enrolled student, OR the course's own lecturer, OR an
+// admin. Originally only checked enrolledStudentIds, which meant the
+// course's own lecturer was rejected with "you must be enrolled" —
+// course.lecturerId was never consulted at all. A lecturer needing
+// their own class roster is exactly as legitimate as a student
+// needing their classmates' names.
+//
 // Returns only _id/name/role per student, same minimal-exposure
 // pattern as profile.controller.js's getUserSummary — never email,
 // universityId, or status.
@@ -419,7 +473,11 @@ exports.getStudentsForCourse = async (req, res) => {
     }
 
     const enrolledIds = Array.isArray(course.enrolledStudentIds) ? course.enrolledStudentIds : [];
-    if (!enrolledIds.includes(req.user.id)) {
+    const isEnrolledStudent = enrolledIds.includes(req.user.id);
+    const isCourseLecturer = course.lecturerId === req.user.id;
+    const isAdmin = req.user.role === "admin";
+
+    if (!isEnrolledStudent && !isCourseLecturer && !isAdmin) {
       return res.status(403).json({
         status: "error",
         message: "You must be enrolled in this course to view its roster",

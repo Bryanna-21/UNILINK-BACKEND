@@ -13,9 +13,16 @@ router.get("/:id", auth, ctrl.getCourseById);
 router.post("/:id/enroll", auth, ctrl.enrollInCourse);
 router.get("/:courseId/students", auth, ctrl.getStudentsForCourse);
 
-// Units
+// Units — Unit is a global catalog (superadmin-managed, see
+// admin.routes.js's /admin/units); this attaches an existing catalog
+// unit to a course, it does not create a new one.
+// /units/catalog before /:courseId/units even though they don't
+// actually collide (different second segment) — kept together for
+// readability, and to avoid relying on that non-collision holding as
+// routes are edited later.
+router.get("/units/catalog", auth, ctrl.getUnitCatalog);
 router.get("/:courseId/units", auth, ctrl.getUnitsForCourse);
-router.post("/:courseId/units", auth, ctrl.createUnit);
+router.post("/:courseId/units", auth, ctrl.attachUnit);
 
 // Assignments
 router.get("/:courseId/assignments", auth, ctrl.getAssignmentsForCourse);
