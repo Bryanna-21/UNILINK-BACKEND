@@ -21,4 +21,13 @@ router.put("/me", auth, ctrl.updateMyProfile);
 router.put("/me/avatar", auth, uploadImage.single("avatar"), ctrl.uploadAvatar);
 router.put("/me/cover", auth, uploadImage.single("cover"), ctrl.uploadCover);
 
+// Trusted contacts — notified on SOS (see emergency.controller.js's
+// reportEmergency, type "sos").
+router.get("/trusted-contacts", auth, ctrl.getTrustedContacts);
+router.post("/trusted-contacts", auth, ctrl.addTrustedContact);
+router.delete("/trusted-contacts/:contactId", auth, ctrl.deleteTrustedContact);
+
+// Push notification token registration.
+router.post("/push-token", auth, ctrl.registerPushToken);
+
 module.exports = router;

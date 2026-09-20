@@ -13,6 +13,28 @@ const userSchema = new mongoose.Schema({
   // (ViewSubmission.js) that need to identify a student beyond name/
   // email; not used for authentication or lookups anywhere.
   admissionNumber: { type: String, default: "" },
+  // Contacts notified when this user triggers an SOS (see
+  // emergency.controller.js's reportEmergency, type "sos"). Plain
+  // embedded subdocuments, not a separate collection or User
+  // references — a trusted contact is very often not a UniLink user
+  // at all (a parent, a sibling), just a name and phone number to
+  // reach in an emergency.
+  trustedContacts: [
+    {
+      name: { type: String, required: true },
+      phone: { type: String, required: true },
+      relationship: { type: String, default: "" },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
+  // Expo push token for this device, registered on login/app-open
+  // (see auth.routes.js's /register-push-token). One token per user
+  // for now, not an array — a user signed in on a second device
+  // simply overwrites the previous token, meaning push only reaches
+  // their most recently active device. Real multi-device support
+  // would need an array of {token, deviceId, lastSeenAt} instead;
+  // out of scope for tonight's build.
+  pushToken: { type: String, default: null },
   // New fields for OTP verification and optional login 2FA.
   // isVerified starts false — an account can't log in at all until
   // its signup OTP is confirmed (see auth.routes.js's /login check).

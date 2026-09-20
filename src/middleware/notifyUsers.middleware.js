@@ -1,4 +1,6 @@
 const UserNotification = require("../models/UserNotification");
+const User = require("../models/User");
+const { sendPushNotification } = require("../utils/push.util");
 
 // Generic per-user notification creator, mirroring
 // notifyAdmins.middleware.js's shape but for arbitrary
@@ -34,6 +36,17 @@ async function notifyUsers({ recipientIds, type, title, message, link, context =
         examId: context.examId || null,
       }))
     );
+
+    // Real OS-level push, in addition to the in-app UserNotification
+    // rows above. The in-app record is the source of truth (what
+    // MyNotifications.js reads) - push is purely a best-effort nudge
+    // so a recipient finds out without having the app open. A
+    // recipient with no pushToken registered simply gets no push,
+    // silently (see push.util.js's own skip-on-null-token behavior).
+    const recipients = await User.find({ _id: { $in: uniqueIds } }).select("pushToken");
+    recipients.forEach((r) => {
+      if (r.pushToken) sendPushNotification(r.pushToken, { title, body: message, data: { type, link } });
+    });
   } catch (error) {
     console.error("✗ Failed to notify user(s):", error.message);
   }

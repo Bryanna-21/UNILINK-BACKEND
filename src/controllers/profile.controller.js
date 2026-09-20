@@ -175,3 +175,73 @@ const uploadProfileImage = (fieldName, cloudinaryFolder) => async (req, res) => 
 
 exports.uploadAvatar = uploadProfileImage("avatarUrl", "unilink/avatars");
 exports.uploadCover = uploadProfileImage("coverUrl", "unilink/covers");
+
+// ============================================================
+// TRUSTED CONTACTS
+// ============================================================
+// Plain embedded array on User, not a separate model or collection —
+// see User.js's own comment on trustedContacts for why (a contact is
+// very often not a UniLink user at all).
+
+exports.getTrustedContacts = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("trustedContacts");
+    res.status(200).json({ status: "success", data: user?.trustedContacts || [] });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching trusted contacts: " + error.message });
+  }
+};
+
+exports.addTrustedContact = async (req, res) => {
+  try {
+    const { name, phone, relationship } = req.body;
+    if (!name || !phone) {
+      return res.status(400).json({ status: "error", message: "name and phone are required" });
+    }
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $push: { trustedContacts: { name: name.trim(), phone: phone.trim(), relationship: (relationship || "").trim() } } },
+      { new: true }
+    ).select("trustedContacts");
+    res.status(201).json({ status: "success", data: user.trustedContacts });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error adding trusted contact: " + error.message });
+  }
+};
+
+exports.deleteTrustedContact = async (req, res) => {
+  try {
+    const { contactId } = req.params;
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      { $pull: { trustedContacts: { _id: contactId } } },
+      { new: true }
+    ).select("trustedContacts");
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    res.status(200).json({ status: "success", data: user.trustedContacts });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error removing trusted contact: " + error.message });
+  }
+};
+
+// ============================================================
+// PUSH TOKEN REGISTRATION
+// ============================================================
+// Called once on login/app-open with the device's Expo push token
+// (see mobile's src/utils/pushNotifications.ts). One token per user —
+// see User.js's own comment on the single-device limitation.
+
+exports.registerPushToken = async (req, res) => {
+  try {
+    const { pushToken } = req.body;
+    if (!pushToken || typeof pushToken !== "string") {
+      return res.status(400).json({ status: "error", message: "pushToken is required" });
+    }
+    await User.findByIdAndUpdate(req.user.id, { $set: { pushToken } });
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error registering push token: " + error.message });
+  }
+};

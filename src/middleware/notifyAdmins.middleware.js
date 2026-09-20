@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const Notification = require("../models/Notification");
 const { emitToAdmins } = require("../socket");
+const { sendPushNotification } = require("../utils/push.util");
 
 // Fans a notification out to every admin user. Called from event sites
 // elsewhere in the codebase (see emergency.controller.js and
@@ -14,7 +15,7 @@ const { emitToAdmins } = require("../socket");
 // even if notifying admins fails).
 async function notifyAdmins({ type, title, message, link }) {
   try {
-    const admins = await User.find({ role: "admin" }).select("_id").lean();
+    const admins = await User.find({ role: "admin" }).select("_id pushToken").lean();
     if (admins.length === 0) return;
 
     await Notification.insertMany(
@@ -32,6 +33,11 @@ async function notifyAdmins({ type, title, message, link }) {
     // (and what a newly-opened tab sees) — this just skips the wait
     // for an admin already connected.
     emitToAdmins("admin-notification", { type, title, message, link, createdAt: new Date().toISOString() });
+
+    // Real OS-level push too, same rationale as notifyUsers.middleware.js.
+    admins.forEach((admin) => {
+      if (admin.pushToken) sendPushNotification(admin.pushToken, { title, body: message, data: { type, link } });
+    });
   } catch (error) {
     console.error("✗ Failed to notify admins:", error.message);
   }
