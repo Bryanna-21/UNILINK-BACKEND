@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
 // to a scoped lecturer once course-linked, or university-linked for
 // a general/campus-wide report (see courseId comment below).
 const RESTRICTED_TYPES = ["abuse"];
-const VALID_TYPES = ["medical", "safety", "abuse"];
+const VALID_TYPES = ["medical", "safety", "abuse", "sos"];
 
 const EmergencyReportSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -30,6 +30,30 @@ const EmergencyReportSchema = new mongoose.Schema({
   type: { type: String, enum: VALID_TYPES, required: true },
   message: { type: String },
   location: { type: String },
+
+  // GPS coordinates, distinct from the free-text `location` above
+  // (e.g. "Library, 2nd floor") — set only for type "sos", where a
+  // precise point matters and a human description alone isn't
+  // enough. Optional on every other type; never required at the
+  // schema level since a non-SOS report has no reason to carry it.
+  coordinates: {
+    latitude: { type: Number, default: null },
+    longitude: { type: Number, default: null },
+  },
+
+  // Set at creation for type "sos" only — the reporting user's own
+  // trustedContacts snapshotted at the moment of the alert, not a
+  // live reference to User.trustedContacts. If the user edits their
+  // contact list later, this report still shows who was actually
+  // notified at the time, not who's on the list now.
+  notifiedContacts: [
+    {
+      name: String,
+      phone: String,
+      notifiedAt: { type: Date, default: Date.now },
+      smsStatus: { type: String, enum: ["sent", "failed", "not_configured"], default: "not_configured" },
+    },
+  ],
 
   status: {
     type: String,

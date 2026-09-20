@@ -1,8 +1,11 @@
 const mongoose = require("mongoose");
 const EmergencyReport = require("../models/EmergencyReport");
 const Course = require("../models/Course");
+const User = require("../models/User");
 const notifyAdmins = require("../middleware/notifyAdmins.middleware");
 const logAction = require("../middleware/auditLog.helper");
+const { sendSOSAlert } = require("../utils/sms.util");
+const { sendPushNotification } = require("../utils/push.util");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -13,6 +16,7 @@ const toLecturerPreview = (report) => ({
   priority: report.priority,
   courseId: report.courseId,
   location: report.location,
+  coordinates: report.coordinates,
   createdAt: report.createdAt,
   assignedTo: report.assignedTo,
 });
@@ -22,14 +26,19 @@ const toStudentView = (report) => ({
   type: report.type,
   message: report.message,
   location: report.location,
+  coordinates: report.coordinates,
   status: report.status,
   createdAt: report.createdAt,
   resolvedAt: report.resolvedAt,
+  // Only meaningful for type "sos" (empty array otherwise) - lets the
+  // reporting student see which contacts were actually notified and
+  // whether the SMS genuinely sent, rather than assuming success.
+  notifiedContacts: report.notifiedContacts,
 });
 
 exports.reportEmergency = async (req, res) => {
   try {
-    const { type, message, location, courseId } = req.body;
+    const { type, message, location, courseId, coordinates } = req.body;
 
     if (!type || !EmergencyReport.VALID_TYPES.includes(type)) {
       return res.status(400).json({
@@ -49,24 +58,62 @@ exports.reportEmergency = async (req, res) => {
       }
     }
 
+    // sos always gets high priority and no course scoping — an SOS is
+    // about the person, not tied to a specific class, and it should
+    // never be de-prioritized the way a routine "medium" report might
+    // sit in a queue.
+    const isSOS = type === "sos";
+
     const report = await EmergencyReport.create({
       userId: req.user.id,
       universityId: req.user.universityId,
-      courseId: verifiedCourseId,
+      courseId: isSOS ? null : verifiedCourseId,
       type,
       message,
       location,
+      coordinates: isSOS && coordinates ? { latitude: coordinates.latitude, longitude: coordinates.longitude } : undefined,
+      priority: isSOS ? "high" : undefined,
     });
 
     notifyAdmins({
-      type: "new_emergency_report",
-      title: `New ${type} report`,
+      type: isSOS ? "sos_alert" : "new_emergency_report",
+      title: isSOS ? `🚨 SOS Alert` : `New ${type} report`,
       message: message ? message.slice(0, 140) : "No additional details provided.",
       link: "/reports",
     });
 
+    // SOS-specific: notify the student's own trusted contacts and
+    // confirm to the student's own device that the alert went out.
+    // Both wrapped so a failure here NEVER prevents the report itself
+    // from having already been created successfully above - the
+    // report exists and admins are already notified regardless of
+    // what happens in this block.
+    if (isSOS) {
+      try {
+        const reporter = await User.findById(req.user.id).select("name trustedContacts pushToken");
+        if (reporter?.trustedContacts?.length) {
+          const smsResults = await sendSOSAlert({
+            contacts: reporter.trustedContacts,
+            studentName: reporter.name,
+            location,
+          });
+          report.notifiedContacts = smsResults;
+          await report.save();
+        }
+        if (reporter?.pushToken) {
+          sendPushNotification(reporter.pushToken, {
+            title: "SOS Alert Sent",
+            body: "Your emergency alert has been sent to campus security and your trusted contacts.",
+            data: { reportId: report._id.toString() },
+          });
+        }
+      } catch (sosError) {
+        console.error("✗ SOS notification pipeline failed (report already saved):", sosError.message);
+      }
+    }
+
     await logAction(req, {
-      action: "create_emergency_report",
+      action: isSOS ? "create_sos_alert" : "create_emergency_report",
       targetType: "EmergencyReport",
       targetId: report._id,
     });
