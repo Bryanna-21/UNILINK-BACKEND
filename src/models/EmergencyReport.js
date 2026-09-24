@@ -7,7 +7,17 @@ const mongoose = require("mongoose");
 // to a scoped lecturer once course-linked, or university-linked for
 // a general/campus-wide report (see courseId comment below).
 const RESTRICTED_TYPES = ["abuse"];
-const VALID_TYPES = ["medical", "safety", "abuse", "sos"];
+const VALID_TYPES = ["medical", "safety", "abuse", "sos", "help_request"];
+
+// "help_request" is deliberately NOT an emergency in the same sense as
+// the other four types — it's a general, non-urgent assistance ask
+// (see requestHelp in the controller). It shares this model rather than
+// getting its own collection so it inherits status tracking, admin
+// notification, and audit logging for free, but it must never be mixed
+// into the same triage view as a real emergency (especially SOS)
+// without an explicit opt-in — see getAuthorizedReports'
+// `includeHelpRequests` handling in the controller.
+const NON_EMERGENCY_TYPES = ["help_request"];
 
 const EmergencyReportSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -92,5 +102,6 @@ EmergencyReportSchema.pre("save", function (next) {
 
 EmergencyReportSchema.statics.RESTRICTED_TYPES = RESTRICTED_TYPES;
 EmergencyReportSchema.statics.VALID_TYPES = VALID_TYPES;
+EmergencyReportSchema.statics.NON_EMERGENCY_TYPES = NON_EMERGENCY_TYPES;
 
 module.exports = mongoose.model("EmergencyReport", EmergencyReportSchema);

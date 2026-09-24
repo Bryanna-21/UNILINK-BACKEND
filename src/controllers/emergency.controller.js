@@ -140,11 +140,31 @@ exports.getMyReports = async (req, res) => {
   }
 };
 
+// includeHelpRequests: help_request reports are excluded from this
+// list by default (both admin and lecturer branches below), even
+// though they live in the same collection as real emergencies. This
+// is a deliberate triage decision, not an oversight — someone
+// scanning this endpoint for an active SOS or safety report should
+// never have to scroll past routine "can someone help me with X"
+// requests to find it. Pass ?includeHelpRequests=true explicitly
+// (e.g. from a dedicated "Help Requests" admin view) to see them.
 exports.getAuthorizedReports = async (req, res) => {
   try {
+    // Built as a single $nin array, deliberately NOT as two separate
+    // `type` keys spread from different objects — two `type` keys in
+    // the same query object literal means the second silently wins
+    // and the first is dropped, which here would mean the lecturer
+    // branch's RESTRICTED_TYPES (abuse) exclusion could be clobbered
+    // by the help-request exclusion below it. Merge into one array
+    // instead so both exclusions always apply together.
+    const includeHelpRequests = req.query.includeHelpRequests === "true";
+    const excludedTypes = includeHelpRequests ? [] : EmergencyReport.NON_EMERGENCY_TYPES;
+
     if (req.user.role === "admin") {
-      const reports = await EmergencyReport.find({ universityId: req.user.universityId })
-        .sort({ createdAt: -1 });
+      const reports = await EmergencyReport.find({
+        universityId: req.user.universityId,
+        ...(excludedTypes.length ? { type: { $nin: excludedTypes } } : {}),
+      }).sort({ createdAt: -1 });
       return res.status(200).json({ status: "success", count: reports.length, data: reports });
     }
 
@@ -152,8 +172,10 @@ exports.getAuthorizedReports = async (req, res) => {
       const myCourses = await Course.find({ lecturerId: req.user.id }).select("_id").lean();
       const myCourseIds = myCourses.map((c) => c._id.toString());
 
+      const lecturerExcludedTypes = [...EmergencyReport.RESTRICTED_TYPES, ...excludedTypes];
+
       const reports = await EmergencyReport.find({
-        type: { $nin: EmergencyReport.RESTRICTED_TYPES },
+        type: { $nin: lecturerExcludedTypes },
         $or: [
           { courseId: { $in: myCourseIds } },
           { courseId: null, universityId: req.user.universityId },
@@ -398,9 +420,62 @@ exports.getContacts = async (req, res) => {
   });
 };
 
+// Was previously a stub that returned 200 and did nothing else — no
+// persistence, no notification, no audit trail. A user tapping
+// "Request Help" was being told support would reach out when nothing
+// had actually happened. This mirrors reportEmergency's real pipeline
+// (persist -> notify admins -> audit log) using the "help_request"
+// type, but deliberately does NOT reuse any of the SOS-specific
+// branch (no trusted-contact SMS, no coordinates, no "high" priority)
+// — this is a routine, non-urgent assistance request, not an
+// emergency, and should never be dressed up to look like one.
 exports.requestHelp = async (req, res) => {
-  res.status(200).json({
-    status: "success",
-    message: "Help request received. Support will reach out.",
-  });
+  try {
+    const { message, location, courseId } = req.body;
+
+    let verifiedCourseId = null;
+    if (courseId) {
+      if (!isValidId(courseId)) {
+        return res.status(400).json({ status: "error", message: "Invalid course id" });
+      }
+      const course = await Course.findById(courseId);
+      if (course && course.enrolledStudentIds.includes(req.user.id)) {
+        verifiedCourseId = courseId;
+      }
+    }
+
+    const report = await EmergencyReport.create({
+      userId: req.user.id,
+      universityId: req.user.universityId,
+      courseId: verifiedCourseId,
+      type: "help_request",
+      message,
+      location,
+      priority: "low",
+    });
+
+    notifyAdmins({
+      type: "help_request",
+      title: "New help request",
+      message: message ? message.slice(0, 140) : "A student has requested assistance.",
+      link: "/reports?includeHelpRequests=true",
+    });
+
+    await logAction(req, {
+      action: "create_help_request",
+      targetType: "EmergencyReport",
+      targetId: report._id,
+    });
+
+    res.status(201).json({
+      status: "success",
+      message: "Your request has been sent. Support will reach out.",
+      data: toStudentView(report),
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Failed to submit help request: " + error.message,
+    });
+  }
 };
