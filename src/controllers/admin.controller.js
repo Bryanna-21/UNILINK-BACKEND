@@ -86,7 +86,9 @@ exports.markAdminNotificationRead = async (req, res) => {
 
 exports.listUsers = async (req, res) => {
   try {
-    const { search, role } = req.query;
+    const { search, role, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
 
     const query = {};
     if (search) {
@@ -97,10 +99,12 @@ exports.listUsers = async (req, res) => {
     }
     if (role) query.role = role;
 
+    const total = await User.countDocuments(query);
     const users = await User.find(query)
       .select("name email role status universityId createdAt")
       .sort({ createdAt: -1 })
-      .limit(200); // no pagination UI on this page yet — a hard cap keeps one call bounded until it's added
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
 
     const universityIds = [...new Set(users.map((u) => u.universityId).filter(Boolean))];
     const universities = await University.find({ _id: { $in: universityIds } }).select("name");
@@ -109,6 +113,9 @@ exports.listUsers = async (req, res) => {
     res.json({
       status: "success",
       count: users.length,
+      total,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
       data: users.map((u) => ({
         id: u._id,
         name: u.name,
