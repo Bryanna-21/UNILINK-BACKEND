@@ -90,7 +90,16 @@ exports.postDiscussion = async (req, res) => {
 
 exports.getClubs = async (req, res) => {
   try {
-    const clubs = await Club.find({}).sort({ createdAt: -1 });
+    // Scoped to the requester's own university — previously this
+    // returned every club globally, with no isolation at all.
+    // universityId is NOT on the JWT payload (only id/tokenVersion
+    // are — see auth.middleware.js), so it's looked up fresh here
+    // rather than trusted from req.user. Slightly more DB load per
+    // request, but avoids needing a JWT/session migration for every
+    // already-logged-in user, and stays correct if a user's
+    // university is ever changed after their token was issued.
+    const requester = await User.findById(req.user.id).select("universityId");
+    const clubs = await Club.find({ universityId: requester?.universityId }).sort({ createdAt: -1 });
     res.status(200).json({ status: "success", count: clubs.length, data: clubs });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching clubs: " + error.message });
@@ -103,10 +112,12 @@ exports.createClub = async (req, res) => {
     if (!name) {
       return res.status(400).json({ status: "error", message: "name is required" });
     }
+    const requester = await User.findById(req.user.id).select("universityId");
     const club = await Club.create({
       name,
       description,
       ownerId: req.user.id,
+      universityId: requester?.universityId,
       memberIds: [req.user.id]
     });
     res.status(201).json({ status: "success", data: club });
@@ -312,7 +323,12 @@ exports.voteOnPoll = async (req, res) => {
 
 exports.getAnnouncements = async (req, res) => {
   try {
-    const filter = req.query.courseId ? { courseId: req.query.courseId } : {};
+    // Always scoped to the requester's own university, even for
+    // course-specific announcements. universityId looked up fresh
+    // (not from the JWT) — see getClubs' comment above for why.
+    const requester = await User.findById(req.user.id).select("universityId");
+    const filter = { universityId: requester?.universityId };
+    if (req.query.courseId) filter.courseId = req.query.courseId;
     const announcements = await Announcement.find(filter).sort({ createdAt: -1 });
     res.status(200).json({ status: "success", count: announcements.length, data: announcements });
   } catch (error) {
@@ -329,7 +345,8 @@ exports.createAnnouncement = async (req, res) => {
     if (!title || !body) {
       return res.status(400).json({ status: "error", message: "title and body are required" });
     }
-    const announcement = await Announcement.create({ title, body, courseId, postedBy: req.user.id });
+    const requester = await User.findById(req.user.id).select("universityId");
+    const announcement = await Announcement.create({ title, body, courseId, postedBy: req.user.id, universityId: requester?.universityId });
     res.status(201).json({ status: "success", data: announcement });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error creating announcement: " + error.message });
