@@ -55,10 +55,41 @@ exports.getMyConversations = async (req, res) => {
       req.user.id
     );
 
-    const withUnread = conversations.map((c) => ({
-      ...c.toObject(),
-      unreadCount: countByConversationId[c._id.toString()] || 0,
-    }));
+    // One most-recent message per conversation, for the list preview
+    // (e.g. "James: Assignment is due..." or "Photo"). Fetched as a
+    // single batched query rather than N queries per conversation —
+    // sort by conversationId then createdAt desc, then take the first
+    // message seen per conversationId in JS, since Mongo has no
+    // built-in "top 1 per group" without the aggregation pipeline.
+    const conversationIds = conversations.map((c) => c._id.toString());
+    const recentMessages = await Message.find({ conversationId: { $in: conversationIds } })
+      .sort({ conversationId: 1, createdAt: -1 })
+      .select("conversationId senderId text fileUrl createdAt");
+
+    const lastMessageByConversationId = {};
+    for (const msg of recentMessages) {
+      const key = msg.conversationId.toString();
+      if (!lastMessageByConversationId[key]) {
+        lastMessageByConversationId[key] = msg;
+      }
+    }
+
+    const withUnread = conversations.map((c) => {
+      const last = lastMessageByConversationId[c._id.toString()];
+      return {
+        ...c.toObject(),
+        unreadCount: countByConversationId[c._id.toString()] || 0,
+        lastMessage: last
+          ? {
+              senderId: last.senderId,
+              // Preview text only — never expose fileUrl itself here,
+              // this is a list-row summary, not the actual attachment.
+              preview: last.fileUrl ? "Photo" : (last.text || "").slice(0, 80),
+              createdAt: last.createdAt,
+            }
+          : null,
+      };
+    });
 
     res.status(200).json({ status: "success", count: withUnread.length, data: withUnread });
   } catch (error) {
