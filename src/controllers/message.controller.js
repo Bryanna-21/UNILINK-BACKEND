@@ -308,6 +308,36 @@ exports.leaveConversation = async (req, res) => {
 // read action, matching how most chat apps behave. $addToSet avoids
 // duplicate entries if this fires more than once for the same user
 // (e.g. re-fetching during polling).
+// Lightweight conversation metadata (type + participants) for
+// screens that only have a conversationId and need to know what kind
+// of conversation they're rendering — e.g. chat/[id].tsx needs `type`
+// to decide whether read receipts make sense (direct: unambiguous;
+// group: a single checkmark means nothing with 15 participants) and
+// `participantIds` to know WHO the other direct participant is.
+// Deliberately separate from getMyConversations (which returns every
+// conversation for the list screen) rather than overloading that
+// endpoint's shape for a single-conversation lookup.
+exports.getConversationInfo = async (req, res) => {
+  try {
+    if (!isValidId(req.params.conversationId)) {
+      return res.status(400).json({ status: "error", message: "Invalid conversation id" });
+    }
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+      return res.status(403).json({ status: "error", message: "Not a participant in this conversation" });
+    }
+    res.status(200).json({
+      status: "success",
+      data: {
+        type: conversation.type,
+        participantIds: conversation.participantIds,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching conversation info: " + error.message });
+  }
+};
+
 exports.getMessages = async (req, res) => {
   try {
     if (!isValidId(req.params.conversationId)) {

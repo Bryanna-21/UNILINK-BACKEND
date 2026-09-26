@@ -10,6 +10,7 @@ router.post("/:conversationId/join", auth, ctrl.joinConversation);
 router.post("/:conversationId/members", auth, ctrl.addMember);
 router.post("/:conversationId/leave", auth, ctrl.leaveConversation);
 
+router.get("/:conversationId/info", auth, ctrl.getConversationInfo);
 router.get("/:conversationId/messages", auth, ctrl.getMessages);
 router.post("/:conversationId/messages", auth, ctrl.sendMessage);
 
