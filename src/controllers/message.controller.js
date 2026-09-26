@@ -79,6 +79,11 @@ exports.getMyConversations = async (req, res) => {
       return {
         ...c.toObject(),
         unreadCount: countByConversationId[c._id.toString()] || 0,
+        // Derived, per-requesting-user flag — the raw pinnedBy array
+        // is still included via ...c.toObject() above for anyone who
+        // needs it, but the mobile list should only ever need to ask
+        // "is this pinned for ME", not inspect who else pinned it.
+        isPinned: c.pinnedBy.includes(req.user.id),
         lastMessage: last
           ? {
               senderId: last.senderId,
@@ -335,6 +340,35 @@ exports.getConversationInfo = async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching conversation info: " + error.message });
+  }
+};
+
+// Toggle pin state for the CURRENT USER only — adds/removes their
+// own id from pinnedBy. No restriction on which conversation types
+// can be pinned (direct, course, and group are all pinnable); the
+// only requirement is being a participant, same check used
+// throughout this file for every other per-conversation action.
+exports.togglePin = async (req, res) => {
+  try {
+    if (!isValidId(req.params.conversationId)) {
+      return res.status(400).json({ status: "error", message: "Invalid conversation id" });
+    }
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+      return res.status(403).json({ status: "error", message: "Not a participant in this conversation" });
+    }
+
+    const alreadyPinned = conversation.pinnedBy.includes(req.user.id);
+    if (alreadyPinned) {
+      conversation.pinnedBy = conversation.pinnedBy.filter((id) => id !== req.user.id);
+    } else {
+      conversation.pinnedBy.push(req.user.id);
+    }
+    await conversation.save();
+
+    res.status(200).json({ status: "success", data: { pinned: !alreadyPinned } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error toggling pin: " + error.message });
   }
 };
 

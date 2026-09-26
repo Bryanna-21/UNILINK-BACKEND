@@ -16,6 +16,13 @@ const conversationSchema = new mongoose.Schema({
   courseId: { type: String, default: null },
   title: { type: String, default: null },
   createdBy: { type: String, default: null }, // set for type "group"; who created it
+  // Per-user pin, NOT a conversation-wide flag — pinning is a
+  // personal list-organization preference, not something one
+  // participant should be able to impose on everyone else in a
+  // group/course chat. Same array-of-userIds shape as Message's
+  // readBy, for the same reason: membership in the array IS the
+  // state, no separate boolean needed per user.
+  pinnedBy: { type: [String], default: [] },
   lastMessageAt: { type: Date, default: Date.now },
   createdAt: { type: Date, default: Date.now },
 });
