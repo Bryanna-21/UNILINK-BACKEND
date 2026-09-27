@@ -98,8 +98,13 @@ exports.getClubs = async (req, res) => {
     // request, but avoids needing a JWT/session migration for every
     // already-logged-in user, and stays correct if a user's
     // university is ever changed after their token was issued.
-    const requester = await User.findById(req.user.id).select("universityId");
-    const clubs = await Club.find({ universityId: requester?.universityId }).sort({ createdAt: -1 });
+    const requester = await User.findById(req.user.id).select("universityId role");
+    // Superadmin sees every club across every university — platform-
+    // wide scope, per UniLink's Admin vs SuperAdmin spec. Everyone
+    // else (including university-level "admin") is scoped to their
+    // own universityId.
+    const clubFilter = requester?.role === "superadmin" ? {} : { universityId: requester?.universityId };
+    const clubs = await Club.find(clubFilter).sort({ createdAt: -1 });
     res.status(200).json({ status: "success", count: clubs.length, data: clubs });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching clubs: " + error.message });
@@ -326,8 +331,8 @@ exports.getAnnouncements = async (req, res) => {
     // Always scoped to the requester's own university, even for
     // course-specific announcements. universityId looked up fresh
     // (not from the JWT) — see getClubs' comment above for why.
-    const requester = await User.findById(req.user.id).select("universityId");
-    const filter = { universityId: requester?.universityId };
+    const requester = await User.findById(req.user.id).select("universityId role");
+    const filter = requester?.role === "superadmin" ? {} : { universityId: requester?.universityId };
     if (req.query.courseId) filter.courseId = req.query.courseId;
     const announcements = await Announcement.find(filter).sort({ createdAt: -1 });
     res.status(200).json({ status: "success", count: announcements.length, data: announcements });

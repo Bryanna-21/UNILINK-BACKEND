@@ -121,9 +121,15 @@ exports.createPost = async (req, res) => {
       }
     }
 
+    // universityId looked up fresh from the DB, not trusted from
+    // req.user — the JWT payload only carries id/tokenVersion (see
+    // auth.middleware.js), so req.user.universityId has always been
+    // undefined here. This was silently writing universityId: null
+    // on every single post since this field was added.
+    const requester = await User.findById(userId).select("universityId");
     const post = await Post.create({
       userId,
-      universityId: req.user?.universityId || null,
+      universityId: requester?.universityId || null,
       title,
       content,
       media,
@@ -148,7 +154,12 @@ exports.getFeed = async (req, res) => {
   try {
     const userId = getUserId(req);
 
-    const posts = await Post.find({})
+    // Scoped to the requester's own university — previously this
+    // returned every post globally, with no isolation at all, same
+    // class of bug already found and fixed in Club/Announcement.
+    const requester = await User.findById(userId).select("universityId role");
+    const feedFilter = requester?.role === "superadmin" ? {} : { universityId: requester?.universityId };
+    const posts = await Post.find(feedFilter)
       .sort({ score: -1, createdAt: -1 })
       .limit(50)
       .lean();
