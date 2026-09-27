@@ -558,6 +558,28 @@ exports.createUniversity = async (req, res) => {
       verified: false,
     });
 
+    // Every university gets exactly one auto-created, always-present
+    // university-wide Community — membership for it is computed at
+    // query time (user.universityId === this community's
+    // universityId), never stored as CommunityMembership rows. This
+    // is the ONLY place type: 'university-wide' is ever created;
+    // community_v2.controller.js's createCommunity explicitly
+    // forbids that type. Non-fatal if this fails — the university
+    // itself is still valid without it, logged rather than thrown.
+    try {
+      const Community = require("../models/Community");
+      await Community.create({
+        universityId: university._id.toString(),
+        name: `${name} Community`,
+        type: "university-wide",
+        description: `The official campus-wide community for ${name}.`,
+        isPublic: true,
+        createdBy: null,
+      });
+    } catch (communityError) {
+      console.error("Failed to auto-create university-wide community:", communityError.message);
+    }
+
     await AuditLog.create({
       adminId: req.user.id,
       adminEmail: req.user.email,
