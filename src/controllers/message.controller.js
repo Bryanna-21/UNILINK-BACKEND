@@ -55,10 +55,46 @@ exports.getMyConversations = async (req, res) => {
       req.user.id
     );
 
-    const withUnread = conversations.map((c) => ({
-      ...c.toObject(),
-      unreadCount: countByConversationId[c._id.toString()] || 0,
-    }));
+    // One most-recent message per conversation, for the list preview
+    // (e.g. "James: Assignment is due..." or "Photo"). Fetched as a
+    // single batched query rather than N queries per conversation —
+    // sort by conversationId then createdAt desc, then take the first
+    // message seen per conversationId in JS, since Mongo has no
+    // built-in "top 1 per group" without the aggregation pipeline.
+    const conversationIds = conversations.map((c) => c._id.toString());
+    const recentMessages = await Message.find({ conversationId: { $in: conversationIds } })
+      .sort({ conversationId: 1, createdAt: -1 })
+      .select("conversationId senderId text fileUrl createdAt");
+
+    const lastMessageByConversationId = {};
+    for (const msg of recentMessages) {
+      const key = msg.conversationId.toString();
+      if (!lastMessageByConversationId[key]) {
+        lastMessageByConversationId[key] = msg;
+      }
+    }
+
+    const withUnread = conversations.map((c) => {
+      const last = lastMessageByConversationId[c._id.toString()];
+      return {
+        ...c.toObject(),
+        unreadCount: countByConversationId[c._id.toString()] || 0,
+        // Derived, per-requesting-user flag — the raw pinnedBy array
+        // is still included via ...c.toObject() above for anyone who
+        // needs it, but the mobile list should only ever need to ask
+        // "is this pinned for ME", not inspect who else pinned it.
+        isPinned: c.pinnedBy.includes(req.user.id),
+        lastMessage: last
+          ? {
+              senderId: last.senderId,
+              // Preview text only — never expose fileUrl itself here,
+              // this is a list-row summary, not the actual attachment.
+              preview: last.fileUrl ? "Photo" : (last.text || "").slice(0, 80),
+              createdAt: last.createdAt,
+            }
+          : null,
+      };
+    });
 
     res.status(200).json({ status: "success", count: withUnread.length, data: withUnread });
   } catch (error) {
@@ -277,6 +313,65 @@ exports.leaveConversation = async (req, res) => {
 // read action, matching how most chat apps behave. $addToSet avoids
 // duplicate entries if this fires more than once for the same user
 // (e.g. re-fetching during polling).
+// Lightweight conversation metadata (type + participants) for
+// screens that only have a conversationId and need to know what kind
+// of conversation they're rendering — e.g. chat/[id].tsx needs `type`
+// to decide whether read receipts make sense (direct: unambiguous;
+// group: a single checkmark means nothing with 15 participants) and
+// `participantIds` to know WHO the other direct participant is.
+// Deliberately separate from getMyConversations (which returns every
+// conversation for the list screen) rather than overloading that
+// endpoint's shape for a single-conversation lookup.
+exports.getConversationInfo = async (req, res) => {
+  try {
+    if (!isValidId(req.params.conversationId)) {
+      return res.status(400).json({ status: "error", message: "Invalid conversation id" });
+    }
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+      return res.status(403).json({ status: "error", message: "Not a participant in this conversation" });
+    }
+    res.status(200).json({
+      status: "success",
+      data: {
+        type: conversation.type,
+        participantIds: conversation.participantIds,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching conversation info: " + error.message });
+  }
+};
+
+// Toggle pin state for the CURRENT USER only — adds/removes their
+// own id from pinnedBy. No restriction on which conversation types
+// can be pinned (direct, course, and group are all pinnable); the
+// only requirement is being a participant, same check used
+// throughout this file for every other per-conversation action.
+exports.togglePin = async (req, res) => {
+  try {
+    if (!isValidId(req.params.conversationId)) {
+      return res.status(400).json({ status: "error", message: "Invalid conversation id" });
+    }
+    const conversation = await Conversation.findById(req.params.conversationId);
+    if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+      return res.status(403).json({ status: "error", message: "Not a participant in this conversation" });
+    }
+
+    const alreadyPinned = conversation.pinnedBy.includes(req.user.id);
+    if (alreadyPinned) {
+      conversation.pinnedBy = conversation.pinnedBy.filter((id) => id !== req.user.id);
+    } else {
+      conversation.pinnedBy.push(req.user.id);
+    }
+    await conversation.save();
+
+    res.status(200).json({ status: "success", data: { pinned: !alreadyPinned } });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error toggling pin: " + error.message });
+  }
+};
+
 exports.getMessages = async (req, res) => {
   try {
     if (!isValidId(req.params.conversationId)) {

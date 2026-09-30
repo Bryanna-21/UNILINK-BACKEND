@@ -13,6 +13,18 @@ const postSchema = new mongoose.Schema({
     index: true,
   },
 
+  // Optional — set only when this post was made INSIDE a community's
+  // feed (see community_v2.controller.js's createCommunityPost). Null
+  // means it's a regular main-feed post, same as before this field
+  // existed. A community post is still also universityId-scoped
+  // (inherited from the community itself), so a superadmin's
+  // platform-wide feed view still sees it if they query broadly.
+  communityId: {
+    type: String,
+    default: null,
+    index: true,
+  },
+
   title: {
     type: String,
     required: true,

@@ -127,14 +127,28 @@ exports.getUserSummary = async (req, res) => {
 // a client accidentally or maliciously includes them in the body.
 exports.updateMyProfile = async (req, res) => {
   try {
-    const { name, bio, phone } = req.body;
+    const { name, bio, phone, admissionNumber } = req.body;
     const update = {};
     if (name !== undefined) update.name = name;
     if (bio !== undefined) update.bio = bio;
     if (phone !== undefined) update.phone = phone;
 
+    // admissionNumber is a one-time, institution-issued identifier —
+    // once set, it locks server-side (not just hidden in the UI) so a
+    // direct API call can't rewrite it either. A student with no
+    // admissionNumber yet (existing accounts predating this field) can
+    // set it once; after that, this field is silently ignored rather
+    // than erroring, so an unaware client resubmitting the same form
+    // doesn't get a spurious failure.
+    if (admissionNumber !== undefined) {
+      const existing = await User.findById(req.user.id).select("admissionNumber");
+      if (existing && !existing.admissionNumber) {
+        update.admissionNumber = admissionNumber;
+      }
+    }
+
     const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true }).select(
-      "name email role universityId bio phone avatarUrl coverUrl"
+      "name email role universityId bio phone avatarUrl coverUrl admissionNumber"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
