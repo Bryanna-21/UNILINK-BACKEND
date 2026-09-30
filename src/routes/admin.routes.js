@@ -14,6 +14,23 @@ const {
   markAdminNotificationRead,
   listUsers,
   getDashboardStats,
+  listStudents,
+  getStudent,
+  updateUserStatus,
+  listUniversities,
+  setUniversityVerified,
+  getUserGrowth,
+  getUniversityGrowth,
+  listAuditLogs,
+  getSystemHealth,
+  createFaculty,
+  listFaculties,
+  updateFaculty,
+  deleteFaculty,
+  createDepartment,
+  listDepartments,
+  updateDepartment,
+  deleteDepartment,
 } = require("../controllers/admin.controller");
 const { requireSuperadmin, requireAdminOrSuperadmin } = require("../middleware/roleGuard");
 const authenticate = require("../middleware/auth.middleware"); // Assuming you have auth middleware
@@ -31,6 +48,18 @@ router.get("/users", authenticate, requireAdminOrSuperadmin, listUsers);
 
 // GET /api/admin/dashboard-stats
 router.get("/dashboard-stats", authenticate, requireAdminOrSuperadmin, getDashboardStats);
+
+// GET /api/admin/students - student-only directory with admissionNumber
+router.get("/students", authenticate, requireAdminOrSuperadmin, listStudents);
+
+// GET /api/admin/students/:id - single student, includes trustedContacts
+router.get("/students/:id", authenticate, requireAdminOrSuperadmin, getStudent);
+
+// PATCH /api/admin/users/:id/status - suspend/activate. requireSuperadmin,
+// not requireAdminOrSuperadmin: unlike browsing (listUsers/listStudents),
+// suspending an account is a state-changing action in the same class as
+// admin/unit create-delete below, not ordinary admin work.
+router.patch("/users/:id/status", authenticate, requireSuperadmin, updateUserStatus);
 
 // ============================================================
 // ADMIN NOTIFICATIONS - Admin or Superadmin
@@ -85,10 +114,64 @@ router.put("/units/:id", authenticate, requireSuperadmin, updateUnit);
 router.delete("/units/:id", authenticate, requireSuperadmin, deleteUnit);
 
 // ============================================================
+// FACULTY MANAGEMENT - Superadmin Only
+// ============================================================
+
+router.post("/faculties", authenticate, requireSuperadmin, createFaculty);
+router.get("/faculties", authenticate, requireSuperadmin, listFaculties);
+router.put("/faculties/:id", authenticate, requireSuperadmin, updateFaculty);
+router.delete("/faculties/:id", authenticate, requireSuperadmin, deleteFaculty);
+
+// ============================================================
+// DEPARTMENT MANAGEMENT - Superadmin Only
+// ============================================================
+
+router.post("/departments", authenticate, requireSuperadmin, createDepartment);
+router.get("/departments", authenticate, requireSuperadmin, listDepartments);
+router.put("/departments/:id", authenticate, requireSuperadmin, updateDepartment);
+router.delete("/departments/:id", authenticate, requireSuperadmin, deleteDepartment);
+
+// ============================================================
 // UNIVERSITY MANAGEMENT - Superadmin Only
 // ============================================================
 
+// GET /api/admin/universities - List/search universities
+router.get("/universities", authenticate, requireSuperadmin, listUniversities);
+
 // POST /api/admin/universities - Create university
 router.post("/universities", authenticate, requireSuperadmin, createUniversity);
+
+// PATCH /api/admin/universities/:id/verified - Verify/unverify
+router.patch("/universities/:id/verified", authenticate, requireSuperadmin, setUniversityVerified);
+
+// ============================================================
+// ANALYTICS - Superadmin Only
+// ============================================================
+
+// GET /api/admin/analytics/user-growth?days=30
+router.get("/analytics/user-growth", authenticate, requireSuperadmin, getUserGrowth);
+
+// GET /api/admin/analytics/university-growth?days=30
+router.get("/analytics/university-growth", authenticate, requireSuperadmin, getUniversityGrowth);
+
+// ============================================================
+// AUDIT LOGS - Superadmin Only
+// ============================================================
+// Superadmin-only, not requireAdminOrSuperadmin: these logs include
+// every admin's actions against each other (ADMIN_CREATE, ADMIN_DELETE,
+// etc.), which an ordinary admin should not be able to browse.
+
+// GET /api/admin/audit-logs?action=&targetType=&adminId=&page=&limit=
+router.get("/audit-logs", authenticate, requireSuperadmin, listAuditLogs);
+
+// ============================================================
+// SYSTEM HEALTH - Admin or Superadmin
+// ============================================================
+// requireAdminOrSuperadmin, not requireSuperadmin: read-only operational
+// visibility (is the DB up, how many users), same tier as dashboard-stats
+// above, not a superadmin-only management action.
+
+// GET /api/admin/system-health
+router.get("/system-health", authenticate, requireAdminOrSuperadmin, getSystemHealth);
 
 module.exports = router;

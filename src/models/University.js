@@ -2,8 +2,18 @@ const mongoose = require("mongoose");
 
 const universitySchema = new mongoose.Schema({
   name: { type: String, required: true },
+  // Added: admin.controller.js's createUniversity has always required,
+  // duplicate-checked, and returned this field, but it was never
+  // declared here — Mongoose's default strict mode silently dropped it
+  // on save, so the duplicate check (`findOne({ email })`) was dead code
+  // and every response lied about what was actually persisted.
+  email: { type: String, required: true, unique: true, trim: true, lowercase: true },
   country: String,
   domainCode: String,
+  // Added: same silent-drop issue as email. createUniversity has always
+  // written status: "active" and returned it, with nothing in the schema
+  // to receive it.
+  status: { type: String, enum: ["active", "inactive"], default: "active" },
   verified: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });

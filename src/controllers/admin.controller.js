@@ -3,6 +3,8 @@ const Unit = require("../models/Unit");
 const University = require("../models/University");
 const AuditLog = require("../models/AuditLog");
 const Notification = require("../models/Notification");
+const Faculty = require("../models/Faculty");
+const Department = require("../models/Department");
 
 // ============================================================
 // ADMIN NOTIFICATIONS
@@ -86,7 +88,9 @@ exports.markAdminNotificationRead = async (req, res) => {
 
 exports.listUsers = async (req, res) => {
   try {
-    const { search, role } = req.query;
+    const { search, role, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
 
     const query = {};
     if (search) {
@@ -97,10 +101,12 @@ exports.listUsers = async (req, res) => {
     }
     if (role) query.role = role;
 
+    const total = await User.countDocuments(query);
     const users = await User.find(query)
       .select("name email role status universityId createdAt")
       .sort({ createdAt: -1 })
-      .limit(200); // no pagination UI on this page yet — a hard cap keeps one call bounded until it's added
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
 
     const universityIds = [...new Set(users.map((u) => u.universityId).filter(Boolean))];
     const universities = await University.find({ _id: { $in: universityIds } }).select("name");
@@ -109,6 +115,9 @@ exports.listUsers = async (req, res) => {
     res.json({
       status: "success",
       count: users.length,
+      total,
+      page: pageNum,
+      totalPages: Math.ceil(total / limitNum),
       data: users.map((u) => ({
         id: u._id,
         name: u.name,
@@ -347,7 +356,7 @@ exports.deleteAdmin = async (req, res) => {
 
 exports.createUnit = async (req, res) => {
   try {
-    const { code, name, description, credits, universityId } = req.body;
+    const { code, name, description, credits, universityId, departmentId } = req.body;
 
     if (!code || !name || !credits) {
       return res.status(400).json({ message: "Code, name, and credits required" });
@@ -358,17 +367,43 @@ exports.createUnit = async (req, res) => {
       return res.status(409).json({ message: "Unit code already exists" });
     }
 
+    // Integrity check per spec: a Unit's Department must belong to the
+    // same University as the Unit itself. A Unit with no universityId
+    // (global) cannot take a departmentId either — a department always
+    // belongs to a specific university, so "global unit, specific
+    // department" is a contradiction, not a valid combination.
+    if (departmentId) {
+      const department = await Department.findById(departmentId);
+      if (!department) {
+        return res.status(400).json({ message: "Department not found" });
+      }
+      if (!universityId) {
+        return res.status(400).json({
+          message: "A unit with a departmentId must also specify a universityId matching that department's university",
+        });
+      }
+      if (department.universityId.toString() !== universityId) {
+        return res.status(400).json({
+          message: "Department does not belong to the specified university",
+        });
+      }
+    }
+
     const unit = await Unit.create({
       code,
       name,
       description,
       credits,
       universityId: universityId || null,
+      departmentId: departmentId || null,
       status: "active",
     });
 
     if (unit.universityId) {
       await unit.populate("universityId", "name");
+    }
+    if (unit.departmentId) {
+      await unit.populate("departmentId", "name");
     }
 
     await AuditLog.create({
@@ -378,7 +413,7 @@ exports.createUnit = async (req, res) => {
       targetType: "Unit",
       targetId: unit._id.toString(),
       result: "success",
-      details: JSON.stringify({ code, name, credits }),
+      details: JSON.stringify({ code, name, credits, departmentId }),
     });
 
     res.status(201).json({
@@ -392,6 +427,8 @@ exports.createUnit = async (req, res) => {
         credits: unit.credits,
         universityId: unit.universityId?._id,
         university: unit.universityId?.name,
+        departmentId: unit.departmentId?._id,
+        department: unit.departmentId?.name,
         status: unit.status,
         createdAt: unit.createdAt,
       },
@@ -403,7 +440,7 @@ exports.createUnit = async (req, res) => {
 
 exports.listUnits = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, status, universityId } = req.query;
+    const { page = 1, limit = 10, search, status, universityId, departmentId } = req.query;
 
     const query = {};
     if (search) {
@@ -414,10 +451,12 @@ exports.listUnits = async (req, res) => {
     }
     if (status) query.status = status;
     if (universityId) query.universityId = universityId;
+    if (departmentId) query.departmentId = departmentId;
 
     const total = await Unit.countDocuments(query);
     const units = await Unit.find(query)
       .populate("universityId", "name")
+      .populate("departmentId", "name")
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
@@ -432,6 +471,8 @@ exports.listUnits = async (req, res) => {
         credits: unit.credits,
         universityId: unit.universityId?._id,
         university: unit.universityId?.name,
+        departmentId: unit.departmentId?._id,
+        department: unit.departmentId?.name,
         status: unit.status,
         createdAt: unit.createdAt,
       })),
@@ -450,13 +491,43 @@ exports.listUnits = async (req, res) => {
 exports.updateUnit = async (req, res) => {
   try {
     const { id } = req.params;
-    const { code, name, description, credits, status } = req.body;
+    const { code, name, description, credits, status, universityId, departmentId } = req.body;
 
-    const unit = await Unit.findByIdAndUpdate(
-      id,
-      { code, name, description, credits, status },
-      { new: true }
-    ).populate("universityId", "name");
+    // Same integrity rule as createUnit, applied to the post-update
+    // values. Falls back to the existing unit's own universityId when
+    // the request doesn't touch it, so setting only departmentId on an
+    // already-scoped unit is validated against its current university,
+    // not treated as if universityId were being cleared.
+    if (departmentId) {
+      const existingUnit = await Unit.findById(id);
+      if (!existingUnit) {
+        return res.status(404).json({ message: "Unit not found" });
+      }
+      const effectiveUniversityId = universityId !== undefined ? universityId : existingUnit.universityId?.toString();
+
+      const department = await Department.findById(departmentId);
+      if (!department) {
+        return res.status(400).json({ message: "Department not found" });
+      }
+      if (!effectiveUniversityId) {
+        return res.status(400).json({
+          message: "A unit with a departmentId must also specify a universityId matching that department's university",
+        });
+      }
+      if (department.universityId.toString() !== effectiveUniversityId) {
+        return res.status(400).json({
+          message: "Department does not belong to the specified university",
+        });
+      }
+    }
+
+    const updateFields = { code, name, description, credits, status };
+    if (universityId !== undefined) updateFields.universityId = universityId || null;
+    if (departmentId !== undefined) updateFields.departmentId = departmentId || null;
+
+    const unit = await Unit.findByIdAndUpdate(id, updateFields, { new: true })
+      .populate("universityId", "name")
+      .populate("departmentId", "name");
 
     if (!unit) {
       return res.status(404).json({ message: "Unit not found" });
@@ -469,7 +540,7 @@ exports.updateUnit = async (req, res) => {
       targetType: "Unit",
       targetId: unit._id.toString(),
       result: "success",
-      details: JSON.stringify({ code, name, credits, status }),
+      details: JSON.stringify({ code, name, credits, status, departmentId }),
     });
 
     res.json({
@@ -483,6 +554,8 @@ exports.updateUnit = async (req, res) => {
         credits: unit.credits,
         universityId: unit.universityId?._id,
         university: unit.universityId?.name,
+        departmentId: unit.departmentId?._id,
+        department: unit.departmentId?.name,
         status: unit.status,
         updatedAt: unit.updatedAt,
       },
@@ -527,8 +600,250 @@ exports.deleteUnit = async (req, res) => {
 };
 
 // ============================================================
+// STUDENT DIRECTORY
+// ============================================================
+// A role-scoped view of listUsers above, for Admin/Students.js which
+// wants student-only records plus student-specific fields (admissionNumber)
+// that listUsers' generic .select() doesn't return.
+
+exports.listStudents = async (req, res) => {
+  try {
+    const { search, page = 1, limit = 50, universityId } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+
+    const query = { role: "student" };
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, "i") },
+        { email: new RegExp(search, "i") },
+        { admissionNumber: new RegExp(search, "i") },
+      ];
+    }
+    if (universityId) query.universityId = universityId;
+
+    const total = await User.countDocuments(query);
+    const students = await User.find(query)
+      .select("name email status universityId admissionNumber createdAt")
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+
+    const universityIds = [...new Set(students.map((s) => s.universityId).filter(Boolean))];
+    const universities = await University.find({ _id: { $in: universityIds } }).select("name");
+    const universityById = new Map(universities.map((u) => [u._id.toString(), u.name]));
+
+    res.json({
+      status: "success",
+      data: students.map((s) => ({
+        id: s._id,
+        name: s.name,
+        email: s.email,
+        status: s.status,
+        universityId: s.universityId,
+        university: universityById.get(s.universityId) || null,
+        admissionNumber: s.admissionNumber,
+        createdAt: s.createdAt,
+      })),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// GET /admin/students/:id - single student detail. Not just listStudents
+// filtered client-side: this returns trustedContacts and bio/phone, which
+// the list view deliberately omits (no reason to ship every student's
+// emergency contacts over the wire for a table row).
+exports.getStudent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const student = await User.findOne({ _id: id, role: "student" }).select(
+      "name email status universityId admissionNumber bio phone trustedContacts createdAt"
+    );
+
+    if (!student) {
+      return res.status(404).json({ message: "Student not found" });
+    }
+
+    let universityName = null;
+    if (student.universityId) {
+      const uni = await University.findById(student.universityId).select("name");
+      universityName = uni?.name || null;
+    }
+
+    res.json({
+      status: "success",
+      data: {
+        id: student._id,
+        name: student.name,
+        email: student.email,
+        status: student.status,
+        universityId: student.universityId,
+        university: universityName,
+        admissionNumber: student.admissionNumber,
+        bio: student.bio,
+        phone: student.phone,
+        trustedContacts: student.trustedContacts,
+        createdAt: student.createdAt,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// USER STATUS (suspend / activate) - any role except superadmin
+// ============================================================
+// Deliberately blocks superadmin as a target, same "verify before
+// mutating" pattern as updateAdmin/deleteAdmin above: a wrong :id must
+// never silently suspend a superadmin account. Blocks self-suspension
+// for the same reason a superadmin can't be targeted - an admin
+// locking out their own only working account with no one left to undo it.
+
+exports.updateUserStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!["active", "suspended"].includes(status)) {
+      return res.status(400).json({ message: "Status must be 'active' or 'suspended'" });
+    }
+
+    const target = await User.findById(id);
+    if (!target) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (target.role === "superadmin") {
+      return res.status(403).json({ message: "Cannot change status of a superadmin account" });
+    }
+    if (String(target._id) === String(req.user.id)) {
+      return res.status(403).json({ message: "Cannot change your own account status" });
+    }
+
+    target.status = status;
+    await target.save();
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: status === "suspended" ? "USER_SUSPEND" : "USER_ACTIVATE",
+      targetType: "User",
+      targetId: target._id.toString(),
+      result: "success",
+      details: JSON.stringify({ email: target.email, role: target.role, status }),
+    });
+
+    res.json({
+      status: "success",
+      message: `User ${status === "suspended" ? "suspended" : "activated"} successfully`,
+      data: { id: target._id, status: target.status },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
 // UNIVERSITY MANAGEMENT
 // ============================================================
+
+// GET /admin/universities - list/search. Separate from createUniversity
+// below: the frontend has always been able to create a university but
+// never list what already exists, meaning /universities' table had no
+// way to render anything without this.
+exports.listUniversities = async (req, res) => {
+  try {
+    const { search, status, verified, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+
+    const query = {};
+    if (search) {
+      query.$or = [
+        { name: new RegExp(search, "i") },
+        { email: new RegExp(search, "i") },
+      ];
+    }
+    if (status) query.status = status;
+    if (verified !== undefined) query.verified = verified === "true";
+
+    const total = await University.countDocuments(query);
+    const universities = await University.find(query)
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+
+    res.json({
+      status: "success",
+      data: universities.map((u) => ({
+        id: u._id,
+        name: u.name,
+        email: u.email,
+        country: u.country,
+        domainCode: u.domainCode,
+        status: u.status,
+        verified: u.verified,
+        createdAt: u.createdAt,
+      })),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// PATCH /admin/universities/:id/verified
+exports.setUniversityVerified = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { verified } = req.body;
+
+    if (typeof verified !== "boolean") {
+      return res.status(400).json({ message: "verified must be true or false" });
+    }
+
+    const university = await University.findByIdAndUpdate(
+      id,
+      { verified },
+      { new: true }
+    );
+
+    if (!university) {
+      return res.status(404).json({ message: "University not found" });
+    }
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: verified ? "UNIVERSITY_VERIFY" : "UNIVERSITY_UNVERIFY",
+      targetType: "University",
+      targetId: university._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name: university.name, verified }),
+    });
+
+    res.json({
+      status: "success",
+      message: `University ${verified ? "verified" : "unverified"} successfully`,
+      data: { id: university._id, verified: university.verified },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
 
 exports.createUniversity = async (req, res) => {
   try {
@@ -550,6 +865,28 @@ exports.createUniversity = async (req, res) => {
       status: "active",
       verified: false,
     });
+
+    // Every university gets exactly one auto-created, always-present
+    // university-wide Community — membership for it is computed at
+    // query time (user.universityId === this community's
+    // universityId), never stored as CommunityMembership rows. This
+    // is the ONLY place type: 'university-wide' is ever created;
+    // community_v2.controller.js's createCommunity explicitly
+    // forbids that type. Non-fatal if this fails — the university
+    // itself is still valid without it, logged rather than thrown.
+    try {
+      const Community = require("../models/Community");
+      await Community.create({
+        universityId: university._id.toString(),
+        name: `${name} Community`,
+        type: "university-wide",
+        description: `The official campus-wide community for ${name}.`,
+        isPublic: true,
+        createdBy: null,
+      });
+    } catch (communityError) {
+      console.error("Failed to auto-create university-wide community:", communityError.message);
+    }
 
     await AuditLog.create({
       adminId: req.user.id,
@@ -573,6 +910,560 @@ exports.createUniversity = async (req, res) => {
         verified: university.verified,
         createdAt: university.createdAt,
       },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// ANALYTICS
+// ============================================================
+// Day-bucketed counts over a rolling window, computed with a Mongo
+// aggregation rather than pulling every document into Node and
+// grouping there — this scales with your data size instead of your
+// server's memory. `days` query param controls the window (default
+// 30), capped at 365 to keep the aggregation cheap.
+
+exports.getUserGrowth = async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const rows = await User.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.json({
+      status: "success",
+      data: rows.map((r) => ({ date: r._id, count: r.count })),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getUniversityGrowth = async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const rows = await University.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]);
+
+    res.json({
+      status: "success",
+      data: rows.map((r) => ({ date: r._id, count: r.count })),
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// AUDIT LOGS
+// ============================================================
+// Read side for AuditLog - written to on every admin action above (and
+// from emergency.controller.js via auditLog.helper.js) since this
+// backend's very first admin endpoints, but until now nothing ever
+// read a row back. Filterable by action/targetType/adminId so this
+// doesn't become an unusable wall of text once it has real volume.
+
+exports.listAuditLogs = async (req, res) => {
+  try {
+    const { action, targetType, adminId, page = 1, limit = 50 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
+
+    const query = {};
+    if (action) query.action = action;
+    if (targetType) query.targetType = targetType;
+    if (adminId) query.adminId = adminId;
+
+    const total = await AuditLog.countDocuments(query);
+    const logs = await AuditLog.find(query)
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+
+    res.json({
+      status: "success",
+      data: logs.map((l) => ({
+        id: l._id,
+        adminId: l.adminId,
+        adminEmail: l.adminEmail,
+        action: l.action,
+        targetType: l.targetType,
+        targetId: l.targetId,
+        result: l.result,
+        details: l.details,
+        createdAt: l.createdAt,
+      })),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// SYSTEM HEALTH
+// ============================================================
+// Distinct from the public, unauthenticated GET /api/health in app.js:
+// that one is a bare uptime-check for load balancers / Render. This is
+// the authenticated, admin-panel-facing version with more detail.
+// Collection counts run in parallel via Promise.all rather than
+// sequentially, since none depends on another.
+
+exports.getSystemHealth = async (req, res) => {
+  try {
+    const mongoose = require("mongoose");
+    const dbState = mongoose.connection.readyState; // 1 = connected
+    const dbStateNames = { 0: "disconnected", 1: "connected", 2: "connecting", 3: "disconnecting" };
+
+    const [totalUsers, totalUniversities, totalUnits, activeUsers, suspendedUsers] =
+      await Promise.all([
+        User.countDocuments({}),
+        University.countDocuments({}),
+        Unit.countDocuments({}),
+        User.countDocuments({ status: "active" }),
+        User.countDocuments({ status: "suspended" }),
+      ]);
+
+    res.json({
+      status: "success",
+      data: {
+        database: {
+          connected: dbState === 1,
+          state: dbStateNames[dbState] || "unknown",
+        },
+        uptimeSeconds: Math.floor(process.uptime()),
+        counts: {
+          totalUsers,
+          activeUsers,
+          suspendedUsers,
+          totalUniversities,
+          totalUnits,
+        },
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// FACULTY MANAGEMENT
+// ============================================================
+// University -> Faculty -> Department -> Unit. Superadmin-only per
+// spec, same authority tier as University/Unit/Admin management above.
+
+exports.createFaculty = async (req, res) => {
+  try {
+    const { name, code, universityId } = req.body;
+
+    if (!name || !universityId) {
+      return res.status(400).json({ message: "Name and universityId required" });
+    }
+
+    const university = await University.findById(universityId);
+    if (!university) {
+      return res.status(400).json({ message: "University not found" });
+    }
+
+    const faculty = await Faculty.create({
+      name,
+      code: code || null,
+      universityId,
+      status: "active",
+    });
+    await faculty.populate("universityId", "name");
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "FACULTY_CREATE",
+      targetType: "Faculty",
+      targetId: faculty._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, code, universityId }),
+    });
+
+    res.status(201).json({
+      status: "success",
+      message: "Faculty created successfully",
+      data: {
+        id: faculty._id,
+        name: faculty.name,
+        code: faculty.code,
+        universityId: faculty.universityId._id,
+        university: faculty.universityId.name,
+        status: faculty.status,
+        createdAt: faculty.createdAt,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: "A faculty with this name already exists at this university" });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listFaculties = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, status, universityId } = req.query;
+
+    const query = {};
+    if (search) query.name = new RegExp(search, "i");
+    if (status) query.status = status;
+    if (universityId) query.universityId = universityId;
+
+    const total = await Faculty.countDocuments(query);
+    const faculties = await Faculty.find(query)
+      .populate("universityId", "name")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .sort({ createdAt: -1 });
+
+    res.json({
+      status: "success",
+      data: faculties.map((f) => ({
+        id: f._id,
+        name: f.name,
+        code: f.code,
+        universityId: f.universityId?._id,
+        university: f.universityId?.name,
+        status: f.status,
+        createdAt: f.createdAt,
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateFaculty = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, code, status } = req.body;
+
+    // universityId is deliberately not editable here - moving a
+    // faculty to a different university would orphan every Department
+    // underneath it (each Department's own universityId would no
+    // longer match its parent Faculty's). Delete and recreate instead
+    // if a faculty was genuinely assigned to the wrong university.
+    const faculty = await Faculty.findByIdAndUpdate(
+      id,
+      { name, code, status },
+      { new: true }
+    ).populate("universityId", "name");
+
+    if (!faculty) {
+      return res.status(404).json({ message: "Faculty not found" });
+    }
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "FACULTY_UPDATE",
+      targetType: "Faculty",
+      targetId: faculty._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, code, status }),
+    });
+
+    res.json({
+      status: "success",
+      message: "Faculty updated successfully",
+      data: {
+        id: faculty._id,
+        name: faculty.name,
+        code: faculty.code,
+        universityId: faculty.universityId?._id,
+        university: faculty.universityId?.name,
+        status: faculty.status,
+        updatedAt: faculty.updatedAt,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: "A faculty with this name already exists at this university" });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.deleteFaculty = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Block deletion while Departments still reference this faculty,
+    // rather than deleting it out from under them and leaving orphaned
+    // Department documents with a dangling facultyId. Caller must
+    // delete/reassign those departments first.
+    const dependentCount = await Department.countDocuments({ facultyId: id });
+    if (dependentCount > 0) {
+      return res.status(409).json({
+        message: `Cannot delete: ${dependentCount} department(s) still belong to this faculty`,
+      });
+    }
+
+    const faculty = await Faculty.findByIdAndDelete(id);
+    if (!faculty) {
+      return res.status(404).json({ message: "Faculty not found" });
+    }
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "FACULTY_DELETE",
+      targetType: "Faculty",
+      targetId: faculty._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name: faculty.name }),
+    });
+
+    res.json({
+      status: "success",
+      message: "Faculty deleted successfully",
+      data: { id: faculty._id, status: "deleted" },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// ============================================================
+// DEPARTMENT MANAGEMENT
+// ============================================================
+// universityId is derived from facultyId, never trusted from client
+// input - see the comment on Department.js's universityId field.
+// Integrity per spec: a Department always belongs to the University
+// its chosen Faculty belongs to; there is no independent
+// universityId input to this endpoint at all.
+
+exports.createDepartment = async (req, res) => {
+  try {
+    const { name, code, facultyId } = req.body;
+
+    if (!name || !facultyId) {
+      return res.status(400).json({ message: "Name and facultyId required" });
+    }
+
+    const faculty = await Faculty.findById(facultyId);
+    if (!faculty) {
+      return res.status(400).json({ message: "Faculty not found" });
+    }
+
+    const department = await Department.create({
+      name,
+      code: code || null,
+      facultyId,
+      universityId: faculty.universityId,
+      status: "active",
+    });
+    await department.populate("facultyId", "name");
+    await department.populate("universityId", "name");
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "DEPARTMENT_CREATE",
+      targetType: "Department",
+      targetId: department._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, code, facultyId }),
+    });
+
+    res.status(201).json({
+      status: "success",
+      message: "Department created successfully",
+      data: {
+        id: department._id,
+        name: department.name,
+        code: department.code,
+        facultyId: department.facultyId._id,
+        faculty: department.facultyId.name,
+        universityId: department.universityId._id,
+        university: department.universityId.name,
+        status: department.status,
+        createdAt: department.createdAt,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: "A department with this name already exists under this faculty" });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listDepartments = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search, status, facultyId, universityId } = req.query;
+
+    const query = {};
+    if (search) query.name = new RegExp(search, "i");
+    if (status) query.status = status;
+    if (facultyId) query.facultyId = facultyId;
+    if (universityId) query.universityId = universityId;
+
+    const total = await Department.countDocuments(query);
+    const departments = await Department.find(query)
+      .populate("facultyId", "name")
+      .populate("universityId", "name")
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .sort({ createdAt: -1 });
+
+    res.json({
+      status: "success",
+      data: departments.map((d) => ({
+        id: d._id,
+        name: d.name,
+        code: d.code,
+        facultyId: d.facultyId?._id,
+        faculty: d.facultyId?.name,
+        universityId: d.universityId?._id,
+        university: d.universityId?.name,
+        status: d.status,
+        createdAt: d.createdAt,
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateDepartment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, code, status, facultyId } = req.body;
+
+    const updateFields = { name, code, status };
+
+    // Moving a department to a different faculty is allowed (unlike
+    // Faculty's own universityId, above), but universityId must be
+    // re-derived from the new faculty - never accepted directly from
+    // the client - so the two can't be set to point at different
+    // universities by mistake.
+    if (facultyId) {
+      const faculty = await Faculty.findById(facultyId);
+      if (!faculty) {
+        return res.status(400).json({ message: "Faculty not found" });
+      }
+      updateFields.facultyId = facultyId;
+      updateFields.universityId = faculty.universityId;
+    }
+
+    const department = await Department.findByIdAndUpdate(id, updateFields, { new: true })
+      .populate("facultyId", "name")
+      .populate("universityId", "name");
+
+    if (!department) {
+      return res.status(404).json({ message: "Department not found" });
+    }
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "DEPARTMENT_UPDATE",
+      targetType: "Department",
+      targetId: department._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, code, status, facultyId }),
+    });
+
+    res.json({
+      status: "success",
+      message: "Department updated successfully",
+      data: {
+        id: department._id,
+        name: department.name,
+        code: department.code,
+        facultyId: department.facultyId?._id,
+        faculty: department.facultyId?.name,
+        universityId: department.universityId?._id,
+        university: department.universityId?.name,
+        status: department.status,
+        updatedAt: department.updatedAt,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({ message: "A department with this name already exists under this faculty" });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.deleteDepartment = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Same dependent-check pattern as deleteFaculty: block deletion
+    // while Units still reference this department, rather than
+    // orphaning them.
+    const dependentCount = await Unit.countDocuments({ departmentId: id });
+    if (dependentCount > 0) {
+      return res.status(409).json({
+        message: `Cannot delete: ${dependentCount} unit(s) still belong to this department`,
+      });
+    }
+
+    const department = await Department.findByIdAndDelete(id);
+    if (!department) {
+      return res.status(404).json({ message: "Department not found" });
+    }
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "DEPARTMENT_DELETE",
+      targetType: "Department",
+      targetId: department._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name: department.name }),
+    });
+
+    res.json({
+      status: "success",
+      message: "Department deleted successfully",
+      data: { id: department._id, status: "deleted" },
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

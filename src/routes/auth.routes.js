@@ -66,6 +66,20 @@ router.get("/me", authMiddleware, async (req, res) => {
 });
 
 // Register route
+// Public, unauthenticated — a user filling out the registration form
+// has no token yet, so this cannot sit behind authMiddleware. Only
+// exposes name + id, nothing else about a university, so there is no
+// sensitive-data concern in leaving it open.
+router.get("/universities", async (req, res) => {
+  try {
+    const University = require("../models/University");
+    const universities = await University.find({}).select("name").sort({ name: 1 });
+    res.status(200).json({ status: "success", data: universities });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error fetching universities: " + error.message });
+  }
+});
+
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password, confirmPassword, universityId } = req.body;
