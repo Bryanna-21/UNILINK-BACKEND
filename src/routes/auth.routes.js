@@ -247,7 +247,11 @@ router.post("/login", async (req, res) => {
 
     const user = await User.findOne({ email });
 
-    if (!user) {
+    // A self-deleted account is anonymized (email and password are
+    // scrambled), so it should never match here; this is a belt-and-braces
+    // guard. Same generic message as a wrong password so login never
+    // reveals that an account existed.
+    if (!user || user.deletedAt) {
       return res.status(400).json({
         status: "error",
         message: "Invalid email or password",

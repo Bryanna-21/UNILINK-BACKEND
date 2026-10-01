@@ -364,7 +364,7 @@ exports.escalateReport = async (req, res) => {
 
 exports.updateReportStatus = async (req, res) => {
   try {
-    if (req.user.role !== "admin") {
+    if (req.user.role !== "admin" && req.user.role !== "superadmin") {
       if (!isValidId(req.params.id)) {
         return res.status(400).json({ status: "error", message: "Invalid report id" });
       }
@@ -373,7 +373,7 @@ exports.updateReportStatus = async (req, res) => {
         targetType: "EmergencyReport",
         targetId: req.params.id,
         result: "failure",
-        details: `Denied - role '${req.user.role}' is not admin`,
+        details: `Denied - role '${req.user.role}' is not admin or superadmin`,
       });
       return res.status(403).json({ status: "error", message: "Only admins can resolve or dismiss reports" });
     }

@@ -11,6 +11,10 @@ router.get("/achievements", auth, ctrl.getAchievementsForUser);
 router.get("/achievements/:userId", auth, ctrl.getAchievementsForUser);
 router.get("/summary/:userId", auth, ctrl.getUserSummary);
 
+// Name search for pickers (e.g. new message). Declared before any
+// parameterised route so "search" is never read as a :userId.
+router.get("/search", auth, ctrl.searchUsers);
+
 // Core identity fields (name, bio, phone) — distinct from the
 // /portfolio routes above, which are career/academic extension data.
 // PUT rather than PATCH to match mobile's existing edit.tsx, which
@@ -18,6 +22,8 @@ router.get("/summary/:userId", auth, ctrl.getUserSummary);
 // existed anywhere; kept as PUT here rather than making mobile change
 // its verb for no functional reason.
 router.put("/me", auth, ctrl.updateMyProfile);
+// Soft-delete + anonymize own account. Requires { password }.
+router.delete("/me", auth, ctrl.deleteMyAccount);
 router.put("/me/avatar", auth, uploadImage.single("avatar"), ctrl.uploadAvatar);
 router.put("/me/cover", auth, uploadImage.single("cover"), ctrl.uploadCover);
 

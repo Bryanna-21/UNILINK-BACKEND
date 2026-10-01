@@ -56,6 +56,13 @@ const userSchema = new mongoose.Schema({
   pendingPasswordHash: { type: String, default: undefined },
     pendingResetPasswordHash: { type: String, default: undefined },
   tokenVersion: { type: Number, default: 0 }, 
+  // Set when the user deletes their own account (see profile.controller.js's
+  // deleteMyAccount). Deliberately separate from `status`: "suspended" is an
+  // admin action that can be reversed; deletedAt is a self-initiated,
+  // irreversible anonymization. The _id is preserved so the many collections
+  // that reference this user don't dangle. Null/absent = live account, so
+  // existing documents need no migration.
+  deletedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 module.exports = mongoose.model("User", userSchema);

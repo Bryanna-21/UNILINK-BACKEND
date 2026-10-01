@@ -40,6 +40,10 @@ router.get("/feed", auth, ctrl.getFeed);
 // DYNAMIC ROUTES — KEEP LAST
 // ============================================================
 
+// A user's posts (profile screens). Two segments, so it never collides
+// with "/:id", but kept above the dynamic block for clarity.
+router.get("/user/:userId", auth, ctrl.getPostsByUser);
+
 // Get a specific post
 router.get("/:id", auth, ctrl.getPostById);
 

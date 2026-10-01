@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Conversation = require("../models/Conversation");
 const Message = require("../models/Message");
 const Course = require("../models/Course");
+const User = require("../models/User");
 const notifyUsers = require("../middleware/notifyUsers.middleware");
 
 // NOTE: this is REST-only persistence. There is no Socket.io here —
@@ -117,6 +118,24 @@ exports.startConversation = async (req, res) => {
     const { otherUserId, courseId, title } = req.body;
 
     if (otherUserId) {
+      // Validate the target before creating anything. Previously any
+      // string was accepted: self-messages, nonexistent ids, deleted
+      // accounts, and users at other universities all got a conversation.
+      if (!mongoose.Types.ObjectId.isValid(otherUserId)) {
+        return res.status(400).json({ status: "error", message: "Invalid user id" });
+      }
+      if (String(otherUserId) === String(req.user.id)) {
+        return res.status(400).json({ status: "error", message: "You cannot message yourself" });
+      }
+      const [me, other] = await Promise.all([
+        User.findById(req.user.id).select("universityId role"),
+        User.findById(otherUserId).select("universityId role deletedAt"),
+      ]);
+      const sameUniversity = me && other && String(me.universityId) === String(other.universityId);
+      if (!other || other.deletedAt || (me?.role !== "superadmin" && !sameUniversity)) {
+        return res.status(404).json({ status: "error", message: "User not found" });
+      }
+
       const existing = await Conversation.findOne({
         type: "direct",
         participantIds: { $all: [req.user.id, otherUserId], $size: 2 },

@@ -1,4 +1,6 @@
 const mongoose = require("mongoose");
+const bcryptjs = require("bcryptjs");
+const crypto = require("crypto");
 const Portfolio = require("../models/Portfolio");
 const Achievement = require("../models/Achievement");
 const User = require("../models/User");
@@ -257,5 +259,113 @@ exports.registerPushToken = async (req, res) => {
     res.status(200).json({ status: "success" });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error registering push token: " + error.message });
+  }
+};
+
+// ============================================================
+// USER SEARCH (by name)
+// ============================================================
+// GET /api/profile/search?q=<text>
+// Powers "start a new message" and similar pickers. Scoped to the
+// requester's own university (superadmin sees all), matching the
+// isolation rule getFeed already enforces. Excludes: the requester
+// themself, self-deleted accounts, unverified accounts, and
+// superadmin accounts (not a messaging target). Capped at 20 and
+// requires 2+ characters so it can't be used to dump the user table.
+exports.searchUsers = async (req, res) => {
+  try {
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) {
+      return res.status(400).json({ status: "error", message: "Search text must be at least 2 characters" });
+    }
+    if (q.length > 50) {
+      return res.status(400).json({ status: "error", message: "Search text is too long" });
+    }
+
+    const requester = await User.findById(req.user.id).select("universityId role");
+    if (!requester) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
+    // Escape regex metacharacters: q is user input going into $regex.
+    const safe = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    const filter = {
+      _id: { $ne: req.user.id },
+      name: { $regex: safe, $options: "i" },
+      deletedAt: null,
+      isVerified: true,
+      role: { $ne: "superadmin" },
+    };
+    if (requester.role !== "superadmin") {
+      filter.universityId = requester.universityId;
+    }
+
+    const users = await User.find(filter)
+      .select("_id name role avatarUrl")
+      .sort({ name: 1 })
+      .limit(20)
+      .lean();
+
+    res.status(200).json({ status: "success", count: users.length, data: users });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error searching users: " + error.message });
+  }
+};
+
+// ============================================================
+// ACCOUNT DELETION (soft delete + anonymize)
+// ============================================================
+// DELETE /api/profile/me   body: { password }
+// Requires the current password: a stolen unlocked phone or token
+// must not be enough to destroy an account. The document is kept
+// (so ~20 referencing collections don't dangle) but every
+// identifying field is wiped, the password is replaced with an
+// unguessable hash, and tokenVersion is bumped so every existing
+// session dies immediately. Admins/superadmins cannot self-delete:
+// that would orphan audit-log actors and the admin hierarchy.
+exports.deleteMyAccount = async (req, res) => {
+  try {
+    const { password } = req.body || {};
+    if (!password || typeof password !== "string") {
+      return res.status(400).json({ status: "error", message: "Password is required to delete your account" });
+    }
+
+    const user = await User.findById(req.user.id);
+    if (!user || user.deletedAt) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    if (user.role === "admin" || user.role === "superadmin") {
+      return res.status(403).json({
+        status: "error",
+        message: "Admin accounts cannot be self-deleted. Ask a superadmin to remove this account.",
+      });
+    }
+
+    const ok = await bcryptjs.compare(password, user.password);
+    if (!ok) {
+      return res.status(400).json({ status: "error", message: "Incorrect password" });
+    }
+
+    user.name = "Deleted User";
+    user.email = `deleted+${user._id}@deleted.unilink.invalid`;
+    user.password = await bcryptjs.hash(crypto.randomBytes(32).toString("hex"), 10);
+    user.avatarUrl = null;
+    user.coverUrl = null;
+    user.bio = "";
+    user.phone = "";
+    user.admissionNumber = "";
+    user.trustedContacts = [];
+    user.pushToken = null;
+    user.twoFactorEnabled = false;
+    user.pendingPasswordHash = undefined;
+    user.pendingResetPasswordHash = undefined;
+    user.deletedAt = new Date();
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
+    await user.save();
+
+    res.status(200).json({ status: "success", message: "Account deleted" });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error deleting account: " + error.message });
   }
 };

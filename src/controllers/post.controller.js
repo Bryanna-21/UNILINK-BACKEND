@@ -194,6 +194,50 @@ exports.getFeed = async (req, res) => {
   }
 };
 
+// GET /api/posts/user/:userId - a user's main-feed posts, newest first.
+// Same university isolation as getFeed. Community posts are excluded
+// (communityId: null) because they're visible only to community
+// members; listing them on a public profile would leak them.
+exports.getPostsByUser = async (req, res) => {
+  try {
+    const requesterId = getUserId(req);
+    const { userId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ status: "error", message: "Invalid user id" });
+    }
+
+    const [requester, target] = await Promise.all([
+      User.findById(requesterId).select("universityId role"),
+      User.findById(userId).select("universityId deletedAt"),
+    ]);
+    if (!target || target.deletedAt) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    if (requester?.role !== "superadmin" && String(target.universityId) !== String(requester?.universityId)) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
+    const posts = await Post.find({ userId: String(userId), communityId: null })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    const withAuthors = await attachAuthorNames(posts);
+    const postIds = withAuthors.map((p) => String(p._id));
+    const likes = await Like.find({ userId: requesterId, postId: { $in: postIds } }).select("postId").lean();
+    const liked = new Set(likes.map((l) => l.postId));
+
+    return res.status(200).json({
+      status: "success",
+      count: withAuthors.length,
+      data: withAuthors.map((p) => ({ ...p, liked: liked.has(String(p._id)) })),
+    });
+  } catch (error) {
+    console.error("Get posts by user error:", error);
+    return res.status(500).json({ status: "error", message: "Error fetching user posts: " + error.message });
+  }
+};
+
 exports.getPostById = async (req, res) => {
   try {
     const { id } = req.params;
