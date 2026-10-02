@@ -255,6 +255,11 @@ exports.registerPushToken = async (req, res) => {
     if (!pushToken || typeof pushToken !== "string") {
       return res.status(400).json({ status: "error", message: "pushToken is required" });
     }
+    // Expo issues ONE token per device, shared by every account used on it. If another
+    // account still holds this token (it logged out, or switched away), take it back:
+    // otherwise their notifications, including message previews, keep arriving on a
+    // phone that someone else is now using.
+    await User.updateMany({ pushToken, _id: { $ne: req.user.id } }, { $set: { pushToken: null } });
     await User.findByIdAndUpdate(req.user.id, { $set: { pushToken } });
     res.status(200).json({ status: "success" });
   } catch (error) {
@@ -367,5 +372,16 @@ exports.deleteMyAccount = async (req, res) => {
     res.status(200).json({ status: "success", message: "Account deleted" });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error deleting account: " + error.message });
+  }
+};
+
+// DELETE /api/profile/push-token — called by the app on logout / account switch so this
+// device stops receiving the leaving account's notifications.
+exports.clearPushToken = async (req, res) => {
+  try {
+    await User.findByIdAndUpdate(req.user.id, { $set: { pushToken: null } });
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: "Error clearing push token: " + error.message });
   }
 };

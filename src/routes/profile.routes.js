@@ -35,5 +35,6 @@ router.delete("/trusted-contacts/:contactId", auth, ctrl.deleteTrustedContact);
 
 // Push notification token registration.
 router.post("/push-token", auth, ctrl.registerPushToken);
+router.delete("/push-token", auth, ctrl.clearPushToken);
 
 module.exports = router;

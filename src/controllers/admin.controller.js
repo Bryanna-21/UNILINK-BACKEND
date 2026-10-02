@@ -6,6 +6,10 @@ const Notification = require("../models/Notification");
 const Faculty = require("../models/Faculty");
 const Department = require("../models/Department");
 
+// Search text from the query string goes into a regex: escape it so "(" or ".*" is
+// treated literally (prevents 500s and regex-denial-of-service).
+const escapeRegex = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // ============================================================
 // ADMIN NOTIFICATIONS
 // ============================================================
@@ -95,8 +99,8 @@ exports.listUsers = async (req, res) => {
     const query = {};
     if (search) {
       query.$or = [
-        { name: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
+        { name: new RegExp(escapeRegex(search), "i") },
+        { email: new RegExp(escapeRegex(search), "i") },
       ];
     }
     if (role) query.role = role;
@@ -108,7 +112,15 @@ exports.listUsers = async (req, res) => {
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
 
-    const universityIds = [...new Set(users.map((u) => u.universityId).filter(Boolean))];
+    // universityId is a plain String on User, so legacy/test rows can hold non-ObjectId
+    // text (e.g. the university NAME). Casting those inside $in threw "Cast to ObjectId
+    // failed" and blanked the whole user directory. Only look up valid ids; the rest
+    // simply show no university. (listStudents already had this guard; listUsers did not.)
+    const universityIds = [
+      ...new Set(
+        users.map((u) => u.universityId).filter((id) => id && mongoose.Types.ObjectId.isValid(id))
+      ),
+    ];
     const universities = await University.find({ _id: { $in: universityIds } }).select("name");
     const universityById = new Map(universities.map((u) => [u._id.toString(), u.name]));
 
@@ -226,8 +238,8 @@ exports.listAdmins = async (req, res) => {
     
     if (search) {
       query.$or = [
-        { name: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
+        { name: new RegExp(escapeRegex(search), "i") },
+        { email: new RegExp(escapeRegex(search), "i") },
       ];
     }
     if (status) query.status = status;
@@ -445,8 +457,8 @@ exports.listUnits = async (req, res) => {
     const query = {};
     if (search) {
       query.$or = [
-        { code: new RegExp(search, "i") },
-        { name: new RegExp(search, "i") },
+        { code: new RegExp(escapeRegex(search), "i") },
+        { name: new RegExp(escapeRegex(search), "i") },
       ];
     }
     if (status) query.status = status;
@@ -615,9 +627,9 @@ exports.listStudents = async (req, res) => {
     const query = { role: "student" };
     if (search) {
       query.$or = [
-        { name: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
-        { admissionNumber: new RegExp(search, "i") },
+        { name: new RegExp(escapeRegex(search), "i") },
+        { email: new RegExp(escapeRegex(search), "i") },
+        { admissionNumber: new RegExp(escapeRegex(search), "i") },
       ];
     }
     if (universityId) query.universityId = universityId;
@@ -768,8 +780,8 @@ exports.listUniversities = async (req, res) => {
     const query = {};
     if (search) {
       query.$or = [
-        { name: new RegExp(search, "i") },
-        { email: new RegExp(search, "i") },
+        { name: new RegExp(escapeRegex(search), "i") },
+        { email: new RegExp(escapeRegex(search), "i") },
       ];
     }
     if (status) query.status = status;
@@ -1136,7 +1148,7 @@ exports.listFaculties = async (req, res) => {
     const { page = 1, limit = 10, search, status, universityId } = req.query;
 
     const query = {};
-    if (search) query.name = new RegExp(search, "i");
+    if (search) query.name = new RegExp(escapeRegex(search), "i");
     if (status) query.status = status;
     if (universityId) query.universityId = universityId;
 
@@ -1331,7 +1343,7 @@ exports.listDepartments = async (req, res) => {
     const { page = 1, limit = 10, search, status, facultyId, universityId } = req.query;
 
     const query = {};
-    if (search) query.name = new RegExp(search, "i");
+    if (search) query.name = new RegExp(escapeRegex(search), "i");
     if (status) query.status = status;
     if (facultyId) query.facultyId = facultyId;
     if (universityId) query.universityId = universityId;
