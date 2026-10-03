@@ -25,19 +25,20 @@ const postSchema = new mongoose.Schema({
     index: true,
   },
 
+  // Optional: the title requirement was removed. A post is now text, photos, videos or a mix;
+  // createPost enforces that it has at least one of them. Existing posts keep their titles.
   title: {
     type: String,
-    required: true,
     trim: true,
-    minlength: 5,
     maxlength: 200,
+    default: "",
   },
 
   content: {
     type: String,
-    required: true,
     trim: true,
-    minlength: 10,
+    maxlength: 5000,
+    default: "",
   },
 
   // Deprecated legacy field.

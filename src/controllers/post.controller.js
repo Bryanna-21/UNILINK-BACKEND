@@ -23,14 +23,16 @@ function getUserRole(req) {
 async function attachAuthorNames(posts) {
   const userIds = [...new Set(posts.map((p) => String(p.userId)))];
   const users = await User.find({ _id: { $in: userIds } })
-    .select("_id name")
+    .select("_id name avatarUrl")
     .lean();
 
   const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+  const avatarById = new Map(users.map((u) => [String(u._id), u.avatarUrl || null]));
 
   return posts.map((p) => ({
     ...p,
     authorName: nameById.get(String(p.userId)) || "Unknown user",
+    authorAvatarUrl: avatarById.get(String(p.userId)) || null,
   }));
 }
 
@@ -53,35 +55,40 @@ exports.createPost = async (req, res) => {
       ? req.body.content.trim()
       : "";
 
-    if (!title) {
-      return res.status(400).json({
-        status: "error",
-        message: "Post title is required",
-      });
-    }
-
-    if (title.length < 5) {
-      return res.status(400).json({
-        status: "error",
-        message: "Post title must be at least 5 characters",
-      });
-    }
-
-    if (!content) {
-      return res.status(400).json({
-        status: "error",
-        message: "Post content is required",
-      });
-    }
-
-    if (content.length < 10) {
-      return res.status(400).json({
-        status: "error",
-        message: "Post content must be at least 10 characters",
-      });
-    }
-
+    // Title is optional. Content is optional too, as long as there is media: a post needs
+    // SOMETHING (text, a photo or a video), not a title.
     const files = req.files || [];
+
+    if (!content && files.length === 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "Add some text, a photo or a video to post.",
+      });
+    }
+
+    if (title.length > 200) {
+      return res.status(400).json({
+        status: "error",
+        message: "Title must be 200 characters or fewer",
+      });
+    }
+
+    if (content.length > 5000) {
+      return res.status(400).json({
+        status: "error",
+        message: "Posts can be up to 5000 characters",
+      });
+    }
+
+    // Uploads are buffered in memory (multer memoryStorage) on a small server, so allow one
+    // video per post: several 50 MB videos at once could exhaust RAM and take the API down.
+    if (files.filter((f) => f.mimetype.startsWith("video/")).length > 1) {
+      return res.status(400).json({
+        status: "error",
+        message: "You can attach one video per post.",
+      });
+    }
+
     let media = [];
 
     if (files.length > 0) {
@@ -159,6 +166,27 @@ exports.getFeed = async (req, res) => {
     // class of bug already found and fixed in Club/Announcement.
     const requester = await User.findById(userId).select("universityId role");
     const feedFilter = requester?.role === "superadmin" ? {} : { universityId: requester?.universityId };
+
+    // Members-only community posts have their own membership-gated endpoint
+    // (community_v2). Without this filter they were listed on everyone's main feed.
+    feedFilter.communityId = null;
+
+    // Optional search: ?q= matches post text, title, or the author's name. The text is
+    // escaped before it reaches $regex ("(" or ".*" must not crash or hang the server),
+    // and queries under 2 characters are ignored.
+    const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 50) : "";
+    if (q.length >= 2) {
+      const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const authorFilter = { name: rx, deletedAt: null };
+      if (requester?.role !== "superadmin") authorFilter.universityId = requester?.universityId;
+      const authors = await User.find(authorFilter).select("_id").limit(100).lean();
+      feedFilter.$or = [
+        { content: rx },
+        { title: rx },
+        { userId: { $in: authors.map((a) => String(a._id)) } },
+      ];
+    }
+
     const posts = await Post.find(feedFilter)
       .sort({ score: -1, createdAt: -1 })
       .limit(50)
@@ -458,12 +486,14 @@ exports.getComments = async (req, res) => {
     const comments = await Comment.find({ postId }).sort({ createdAt: 1 }).lean();
 
     const userIds = [...new Set(comments.map((c) => String(c.userId)))];
-    const users = await User.find({ _id: { $in: userIds } }).select("_id name").lean();
+    const users = await User.find({ _id: { $in: userIds } }).select("_id name avatarUrl").lean();
     const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+    const avatarById = new Map(users.map((u) => [String(u._id), u.avatarUrl || null]));
 
     const withAuthors = comments.map((c) => ({
       ...c,
       authorName: nameById.get(String(c.userId)) || "Unknown user",
+      authorAvatarUrl: avatarById.get(String(c.userId)) || null,
     }));
 
     return res.status(200).json({ status: "success", data: withAuthors });

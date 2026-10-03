@@ -276,11 +276,15 @@ exports.createCommunityPost = async (req, res) => {
 
     const title = typeof req.body.title === "string" ? req.body.title.trim() : "";
     const content = typeof req.body.content === "string" ? req.body.content.trim() : "";
-    if (!title || title.length < 5) {
-      return res.status(400).json({ status: "error", message: "Post title is required (min. 5 characters)" });
+    // Title is optional now; community posts are text-only, so the text is what's required.
+    if (title.length > 200) {
+      return res.status(400).json({ status: "error", message: "Title must be 200 characters or fewer" });
     }
-    if (!content || content.length < 10) {
-      return res.status(400).json({ status: "error", message: "Post content is required (min. 10 characters)" });
+    if (!content) {
+      return res.status(400).json({ status: "error", message: "Write something to post." });
+    }
+    if (content.length > 5000) {
+      return res.status(400).json({ status: "error", message: "Posts can be up to 5000 characters" });
     }
 
     const community = await Community.findById(req.params.communityId);
