@@ -15,6 +15,7 @@ const userNotificationRoutes = require("./routes/userNotification.routes");
 const lostAndFoundRoutes = require("./routes/lostAndFound.routes");
 const libraryRoutes = require("./routes/library.routes");
 const profileRoutes = require("./routes/profile.routes");
+const safetyRoutes = require("./routes/safety.routes");
 const messageRoutes = require("./routes/message.routes");
 const examRoutes = require("./routes/exam.routes");
 const followRoutes = require("./routes/follow.routes");
@@ -97,6 +98,7 @@ app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/lost-and-found", lostAndFoundRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/safety", safetyRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/notifications", userNotificationRoutes);
 

@@ -13,6 +13,11 @@ const auditLogSchema = new mongoose.Schema({
   targetId: { type: String, required: true },
   result: { type: String, enum: ["success", "failure"], default: "success" },
   details: { type: String },
+  // Moderation trail: why, and exactly what changed (so any action can be reviewed or undone).
+  reason: { type: String },
+  previousState: { type: mongoose.Schema.Types.Mixed },
+  resultingState: { type: mongoose.Schema.Types.Mixed },
+  metadata: { type: mongoose.Schema.Types.Mixed },
   createdAt: { type: Date, default: Date.now },
 });
 

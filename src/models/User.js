@@ -5,7 +5,24 @@ const userSchema = new mongoose.Schema({
   password: String,
   universityId: String,
   role: { type: String, default: "student" },
-  status: { type: String, enum: ["active", "suspended"], default: "active" },
+  status: { type: String, enum: ["active", "suspended", "terminated"], default: "active" },
+  // Safety & moderation. A temporary suspension ends by itself at suspendedUntil (null with
+  // status "suspended" = until someone lifts it). Restrictions switch off single features.
+  suspendedUntil: { type: Date, default: null },
+  restrictions: {
+    type: [
+      {
+        feature: { type: String, required: true }, // posting | commenting | messaging | communities | uploads | reporting
+        until: { type: Date, default: null }, // null = until lifted
+        reason: { type: String, default: "" },
+        actionId: { type: String, default: null }, // the ModerationAction that imposed it
+      },
+    ],
+    default: [],
+  },
+  reportingBlockedUntil: { type: Date, default: null }, // set when someone is caught misusing reports
+  standardsAcceptedVersion: { type: String, default: null },
+  standardsAcceptedAt: { type: Date, default: null },
   // Student admission/registration number. Optional and student-only
   // in practice (lecturers/admins have no use for it) but not
   // enforced at the schema level, same laxness as other optional
