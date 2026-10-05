@@ -107,13 +107,13 @@ exports.getUserSummary = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.userId)) {
       return res.status(400).json({ status: "error", message: "Invalid user id" });
     }
-    const user = await User.findById(req.params.userId).select("name role avatarUrl bio");
+    const user = await User.findById(req.params.userId).select("name role avatarUrl bio username");
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
     res
       .status(200)
-      .json({ status: "success", data: { _id: user._id, name: user.name, role: user.role, avatarUrl: user.avatarUrl, bio: user.bio } });
+      .json({ status: "success", data: { _id: user._id, name: user.name, role: user.role, avatarUrl: user.avatarUrl, bio: user.bio, username: user.username } });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching user summary: " + error.message });
   }

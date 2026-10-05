@@ -5,6 +5,7 @@ const bcryptjs = require("bcryptjs");
 const User = require("../models/User");
 const authMiddleware = require("../middleware/auth.middleware");
 const { createOtp, verifyOtp, sendOtpEmail } = require("../utils/otp.util");
+const peopleService = require("../services/people.service");
 
 // Kept as the single source of truth for valid roles across the app
 // (used by scripts/seedAdmin.js). Not used to trust a client-supplied
@@ -39,6 +40,7 @@ const userResponseShape = (user) => ({
   email: user.email,
   role: user.role,
   universityId: user.universityId,
+  username: user.username,
 });
 
 // GET /api/auth/me — returns the current user's own profile fields.
@@ -50,7 +52,7 @@ const userResponseShape = (user) => ({
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role universityId bio phone avatarUrl coverUrl"
+      "name email role universityId bio phone avatarUrl coverUrl username"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
@@ -82,7 +84,7 @@ router.get("/universities", async (req, res) => {
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, universityId } = req.body;
+    const { name, email, password, confirmPassword, universityId, username } = req.body;
 
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
@@ -122,6 +124,12 @@ router.post("/register", async (req, res) => {
 
     const hashedPassword = await bcryptjs.hash(password, 10);
 
+    // Username: use the one the client chose (must be valid and free), or generate one.
+    const usernameResult = await peopleService.resolveSignupUsername({ requested: username, name, email });
+    if (!usernameResult.ok) {
+      return res.status(400).json({ status: "error", message: usernameResult.message });
+    }
+
     // isVerified defaults to false on the schema — this account
     // cannot log in yet. No token is issued here anymore; the client
     // must call /verify-otp with the code just emailed before /login
@@ -132,6 +140,7 @@ router.post("/register", async (req, res) => {
       password: hashedPassword,
       universityId,
       role: requestedRole,
+      ...usernameResult.fields,
     });
 
     const code = await createOtp(newUser._id.toString(), "verify_signup");
