@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Follow = require("../models/Follow");
 const User = require("../models/User");
+const peopleService = require("../services/people.service");
 
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
@@ -25,6 +26,10 @@ exports.followUser = async (req, res) => {
     }
 
     const targetUser = await User.findById(followingId).select("_id");
+    // Blocked either way: behave exactly like a user that doesn't exist.
+    if (await peopleService.eitherBlocked(followerId, followingId)) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
     if (!targetUser) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
@@ -78,7 +83,7 @@ exports.getFollowers = async (req, res) => {
 
     const follows = await Follow.find({ followingId: userId }).sort({ createdAt: -1 }).lean();
     const followerIds = follows.map((f) => f.followerId);
-    const users = await User.find({ _id: { $in: followerIds } }).select("_id name role").lean();
+    const users = await User.find({ _id: { $in: followerIds } }).select("_id name username avatarUrl role").lean();
 
     return res.status(200).json({ status: "success", count: users.length, data: users });
   } catch (error) {
@@ -97,7 +102,7 @@ exports.getFollowing = async (req, res) => {
 
     const follows = await Follow.find({ followerId: userId }).sort({ createdAt: -1 }).lean();
     const followingIds = follows.map((f) => f.followingId);
-    const users = await User.find({ _id: { $in: followingIds } }).select("_id name role").lean();
+    const users = await User.find({ _id: { $in: followingIds } }).select("_id name username avatarUrl role").lean();
 
     return res.status(200).json({ status: "success", count: users.length, data: users });
   } catch (error) {

@@ -4,6 +4,7 @@ const Message = require("../models/Message");
 const Course = require("../models/Course");
 const User = require("../models/User");
 const notifyUsers = require("../middleware/notifyUsers.middleware");
+const peopleService = require("../services/people.service");
 
 // NOTE: this is REST-only persistence. There is no Socket.io here —
 // messages are saved and fetched via HTTP, meaning clients have to
@@ -132,6 +133,9 @@ exports.startConversation = async (req, res) => {
         User.findById(otherUserId).select("universityId role deletedAt"),
       ]);
       const sameUniversity = me && other && String(me.universityId) === String(other.universityId);
+      if (other && (await peopleService.eitherBlocked(req.user.id, otherUserId))) {
+        return res.status(404).json({ status: "error", message: "User not found" });
+      }
       if (!other || other.deletedAt || (me?.role !== "superadmin" && !sameUniversity)) {
         return res.status(404).json({ status: "error", message: "User not found" });
       }
@@ -427,6 +431,12 @@ exports.sendMessage = async (req, res) => {
       return res.status(403).json({ status: "error", message: "Not a participant in this conversation" });
     }
     const { text } = req.body;
+    if (conversation.type === "direct") {
+      const otherId = conversation.participantIds.find((id) => id !== req.user.id);
+      if (otherId && (await peopleService.eitherBlocked(req.user.id, otherId))) {
+        return res.status(403).json({ status: "error", message: "You can't send messages in this conversation." });
+      }
+    }
     if (!text || !text.trim()) {
       return res.status(400).json({ status: "error", message: "text is required" });
     }
