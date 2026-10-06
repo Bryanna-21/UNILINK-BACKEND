@@ -331,8 +331,18 @@ exports.getAnnouncements = async (req, res) => {
     // Always scoped to the requester's own university, even for
     // course-specific announcements. universityId looked up fresh
     // (not from the JWT) — see getClubs' comment above for why.
-    const requester = await User.findById(req.user.id).select("universityId role");
-    const filter = requester?.role === "superadmin" ? {} : { universityId: requester?.universityId };
+    const requester = await User.findById(req.user.id).select("universityId campusId role");
+    const filter =
+      requester?.role === "superadmin"
+        ? {}
+        : {
+            universityId: requester?.universityId,
+            $or: [
+              { campusId: null },
+              ...(requester?.campusId ? [{ campusId: requester.campusId }] : []),
+            ],
+          };
+
     if (req.query.courseId) filter.courseId = req.query.courseId;
     const announcements = await Announcement.find(filter).sort({ createdAt: -1 });
     res.status(200).json({ status: "success", count: announcements.length, data: announcements });
@@ -346,12 +356,47 @@ exports.createAnnouncement = async (req, res) => {
     if (!isStaff(req.user.role)) {
       return res.status(403).json({ status: "error", message: "Only lecturers or admins can post announcements" });
     }
-    const { title, body, courseId } = req.body;
+    const { title, body, courseId, campusId } = req.body;
     if (!title || !body) {
       return res.status(400).json({ status: "error", message: "title and body are required" });
     }
-    const requester = await User.findById(req.user.id).select("universityId");
-    const announcement = await Announcement.create({ title, body, courseId, postedBy: req.user.id, universityId: requester?.universityId });
+    const requester = await User.findById(req.user.id).select("universityId campusId role");
+
+    if (!requester?.universityId) {
+      return res.status(400).json({
+        status: "error",
+        message: "Your account is not linked to a university",
+      });
+    }
+
+    let resolvedCampusId = null;
+
+    if (campusId) {
+      const Campus = require("../models/Campus");
+      const campus = await Campus.findOne({
+        _id: campusId,
+        universityId: requester.universityId,
+        status: "active",
+      }).select("_id");
+
+      if (!campus) {
+        return res.status(400).json({
+          status: "error",
+          message: "Selected campus does not belong to your university or is inactive",
+        });
+      }
+
+      resolvedCampusId = campus._id;
+    }
+
+    const announcement = await Announcement.create({
+      title,
+      body,
+      courseId: courseId || null,
+      campusId: resolvedCampusId,
+      postedBy: req.user.id,
+      universityId: requester.universityId,
+    });
     res.status(201).json({ status: "success", data: announcement });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error creating announcement: " + error.message });

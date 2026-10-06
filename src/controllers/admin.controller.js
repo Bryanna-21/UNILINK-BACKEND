@@ -5,6 +5,8 @@ const AuditLog = require("../models/AuditLog");
 const Notification = require("../models/Notification");
 const Faculty = require("../models/Faculty");
 const Department = require("../models/Department");
+const Campus = require("../models/Campus");
+const Announcement = require("../models/Announcement");
 
 // Search text from the query string goes into a regex: escape it so "(" or ".*" is
 // treated literally (prevents 500s and regex-denial-of-service).
@@ -1476,6 +1478,256 @@ exports.deleteDepartment = async (req, res) => {
       status: "success",
       message: "Department deleted successfully",
       data: { id: department._id, status: "deleted" },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+// ============================================================
+// CAMPUS MANAGEMENT
+// ============================================================
+
+exports.createCampus = async (req, res) => {
+  try {
+    const { name, code, universityId } = req.body;
+
+    if (!name || !universityId) {
+      return res.status(400).json({
+        message: "Name and universityId required",
+      });
+    }
+
+    const university = await University.findById(universityId);
+
+    if (!university) {
+      return res.status(400).json({
+        message: "University not found",
+      });
+    }
+
+    const campus = await Campus.create({
+      name,
+      code: code || null,
+      universityId,
+      status: "active",
+    });
+
+    await campus.populate("universityId", "name");
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "CAMPUS_CREATE",
+      targetType: "Campus",
+      targetId: campus._id.toString(),
+      result: "success",
+      details: JSON.stringify({ name, code, universityId }),
+    });
+
+    res.status(201).json({
+      status: "success",
+      message: "Campus created successfully",
+      data: {
+        id: campus._id,
+        name: campus.name,
+        code: campus.code,
+        universityId: campus.universityId._id,
+        university: campus.universityId.name,
+        status: campus.status,
+        createdAt: campus.createdAt,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        message: "A campus with this name already exists at this university",
+      });
+    }
+
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.listCampuses = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 50,
+      search,
+      status,
+      universityId,
+    } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(
+      100,
+      Math.max(1, parseInt(limit, 10) || 50)
+    );
+
+    const query = {};
+
+    if (search) {
+      query.name = new RegExp(escapeRegex(search), "i");
+    }
+
+    if (status) query.status = status;
+    if (universityId) query.universityId = universityId;
+
+    const total = await Campus.countDocuments(query);
+
+    const campuses = await Campus.find(query)
+      .populate("universityId", "name")
+      .sort({ createdAt: -1 })
+      .skip((pageNum - 1) * limitNum)
+      .limit(limitNum);
+
+    res.json({
+      status: "success",
+      data: campuses.map((campus) => ({
+        id: campus._id,
+        name: campus.name,
+        code: campus.code,
+        universityId: campus.universityId?._id,
+        university: campus.universityId?.name,
+        status: campus.status,
+        createdAt: campus.createdAt,
+      })),
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.updateCampus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, code, status, universityId } = req.body;
+
+    const campus = await Campus.findById(id);
+
+    if (!campus) {
+      return res.status(404).json({
+        message: "Campus not found",
+      });
+    }
+
+    const nextUniversityId = universityId || campus.universityId;
+
+    const university = await University.findById(nextUniversityId);
+
+    if (!university) {
+      return res.status(400).json({
+        message: "University not found",
+      });
+    }
+
+    campus.name = name ?? campus.name;
+    campus.code = code !== undefined ? (code || null) : campus.code;
+    campus.status = status ?? campus.status;
+    campus.universityId = nextUniversityId;
+
+    await campus.save();
+    await campus.populate("universityId", "name");
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "CAMPUS_UPDATE",
+      targetType: "Campus",
+      targetId: campus._id.toString(),
+      result: "success",
+      details: JSON.stringify({
+        name: campus.name,
+        code: campus.code,
+        universityId: campus.universityId._id,
+        status: campus.status,
+      }),
+    });
+
+    res.json({
+      status: "success",
+      message: "Campus updated successfully",
+      data: {
+        id: campus._id,
+        name: campus.name,
+        code: campus.code,
+        universityId: campus.universityId._id,
+        university: campus.universityId.name,
+        status: campus.status,
+        updatedAt: campus.updatedAt,
+      },
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(409).json({
+        message: "A campus with this name already exists at this university",
+      });
+    }
+
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.deleteCampus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const userCount = await User.countDocuments({
+      campusId: id,
+    });
+
+    if (userCount > 0) {
+      return res.status(409).json({
+        message: `Cannot delete: ${userCount} user(s) still belong to this campus`,
+      });
+    }
+
+    const announcementCount = await Announcement.countDocuments({
+      campusId: id,
+    });
+
+    if (announcementCount > 0) {
+      return res.status(409).json({
+        message: `Cannot delete: ${announcementCount} announcement(s) still target this campus`,
+      });
+    }
+
+    const campus = await Campus.findByIdAndDelete(id);
+
+    if (!campus) {
+      return res.status(404).json({
+        message: "Campus not found",
+      });
+    }
+
+    await AuditLog.create({
+      adminId: req.user.id,
+      adminEmail: req.user.email,
+      action: "CAMPUS_DELETE",
+      targetType: "Campus",
+      targetId: campus._id.toString(),
+      result: "success",
+      details: JSON.stringify({
+        name: campus.name,
+        universityId: campus.universityId,
+      }),
+    });
+
+    res.json({
+      status: "success",
+      message: "Campus deleted successfully",
+      data: {
+        id: campus._id,
+        status: "deleted",
+      },
     });
   } catch (error) {
     res.status(500).json({ message: error.message });

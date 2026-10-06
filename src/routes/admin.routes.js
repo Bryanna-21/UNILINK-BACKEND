@@ -31,6 +31,10 @@ const {
   listDepartments,
   updateDepartment,
   deleteDepartment,
+  createCampus,
+  listCampuses,
+  updateCampus,
+  deleteCampus,
 } = require("../controllers/admin.controller");
 const { requireSuperadmin, requireAdminOrSuperadmin } = require("../middleware/roleGuard");
 const authenticate = require("../middleware/auth.middleware"); // Assuming you have auth middleware
@@ -130,6 +134,15 @@ router.post("/departments", authenticate, requireSuperadmin, createDepartment);
 router.get("/departments", authenticate, requireSuperadmin, listDepartments);
 router.put("/departments/:id", authenticate, requireSuperadmin, updateDepartment);
 router.delete("/departments/:id", authenticate, requireSuperadmin, deleteDepartment);
+
+// ============================================================
+// CAMPUS MANAGEMENT - Superadmin Only
+// ============================================================
+
+router.post("/campuses", authenticate, requireSuperadmin, createCampus);
+router.get("/campuses", authenticate, requireSuperadmin, listCampuses);
+router.put("/campuses/:id", authenticate, requireSuperadmin, updateCampus);
+router.delete("/campuses/:id", authenticate, requireSuperadmin, deleteCampus);
 
 // ============================================================
 // UNIVERSITY MANAGEMENT - Superadmin Only

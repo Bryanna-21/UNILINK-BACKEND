@@ -28,6 +28,7 @@ const generateToken = (user) => {
       tokenVersion: user.tokenVersion,
       role: user.role,
       universityId: user.universityId,
+      campusId: user.campusId || null,
     },
     process.env.JWT_SECRET,
     { expiresIn: "24h" }
@@ -40,6 +41,7 @@ const userResponseShape = (user) => ({
   email: user.email,
   role: user.role,
   universityId: user.universityId,
+  campusId: user.campusId || null,
   username: user.username,
 });
 
@@ -52,7 +54,7 @@ const userResponseShape = (user) => ({
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role universityId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt"
+      "name email role universityId campusId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
@@ -82,9 +84,42 @@ router.get("/universities", async (req, res) => {
   }
 });
 
+router.get("/universities/:universityId/campuses", async (req, res) => {
+  try {
+    const University = require("../models/University");
+    const Campus = require("../models/Campus");
+
+    const university = await University.findById(req.params.universityId).select("_id");
+
+    if (!university) {
+      return res.status(404).json({
+        status: "error",
+        message: "University not found",
+      });
+    }
+
+    const campuses = await Campus.find({
+      universityId: university._id,
+      status: "active",
+    })
+      .select("name code")
+      .sort({ name: 1 });
+
+    res.status(200).json({
+      status: "success",
+      data: campuses,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Error fetching campuses: " + error.message,
+    });
+  }
+});
+
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, confirmPassword, universityId, username } = req.body;
+    const { name, email, password, confirmPassword, universityId, campusId, username } = req.body;
 
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
@@ -104,6 +139,28 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({
         status: "error",
         message: "Password must be at least 6 characters long",
+      });
+    }
+
+    if (!universityId || !campusId) {
+      return res.status(400).json({
+        status: "error",
+        message: "University and campus are required",
+      });
+    }
+
+    const Campus = require("../models/Campus");
+
+    const campus = await Campus.findOne({
+      _id: campusId,
+      universityId,
+      status: "active",
+    }).select("_id");
+
+    if (!campus) {
+      return res.status(400).json({
+        status: "error",
+        message: "Selected campus does not belong to the selected university or is inactive",
       });
     }
 
@@ -139,6 +196,7 @@ router.post("/register", async (req, res) => {
       email,
       password: hashedPassword,
       universityId,
+      campusId: campus._id,
       role: requestedRole,
       ...usernameResult.fields,
     });

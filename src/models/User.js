@@ -4,6 +4,14 @@ const userSchema = new mongoose.Schema({
   email: { type: String, unique: true },
   password: String,
   universityId: String,
+  // Campus is the student's physical/administrative campus within
+  // their university. Kept as an ObjectId so it references the real
+  // Campus model rather than a free-form or client-defined value.
+  campusId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Campus",
+    default: null,
+  },
   role: { type: String, default: "student" },
   status: { type: String, enum: ["active", "suspended", "terminated"], default: "active" },
   // Safety & moderation. A temporary suspension ends by itself at suspendedUntil (null with
