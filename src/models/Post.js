@@ -25,6 +25,15 @@ const postSchema = new mongoose.Schema({
     index: true,
   },
 
+  // When present, this post is a reshare of another post.
+  // The original post remains the source of truth; the reshare
+  // belongs to the user who reshared it.
+  reshareOf: {
+    type: String,
+    default: null,
+    index: true,
+  },
+
   // Optional: the title requirement was removed. A post is now text, photos, videos or a mix;
   // createPost enforces that it has at least one of them. Existing posts keep their titles.
   title: {
@@ -54,7 +63,7 @@ const postSchema = new mongoose.Schema({
 
       type: {
         type: String,
-        enum: ["image", "video"],
+        enum: ["image", "video", "document"],
         required: true,
       },
 

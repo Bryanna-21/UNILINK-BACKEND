@@ -3,6 +3,7 @@ const Post = require("../models/Post");
 const User = require("../models/User");
 const Comment = require("../models/Comment");
 const Like = require("../models/Like");
+const HiddenPost = require("../models/HiddenPost");
 const {
   uploadBufferToCloudinary,
   cloudinary,
@@ -80,12 +81,35 @@ exports.createPost = async (req, res) => {
       });
     }
 
-    // Uploads are buffered in memory (multer memoryStorage) on a small server, so allow one
-    // video per post: several 50 MB videos at once could exhaust RAM and take the API down.
+    // Uploads are buffered in memory. Keep videos to one per post and
+    // documents to one per post so large raw files cannot multiply memory
+    // and Cloudinary upload pressure.
     if (files.filter((f) => f.mimetype.startsWith("video/")).length > 1) {
       return res.status(400).json({
         status: "error",
         message: "You can attach one video per post.",
+      });
+    }
+
+    const documentMimeTypes = new Set([
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]);
+
+    const documentFiles = files.filter((f) => documentMimeTypes.has(f.mimetype));
+
+    if (documentFiles.length > 1) {
+      return res.status(400).json({
+        status: "error",
+        message: "You can attach one document per post.",
+      });
+    }
+
+    if (documentFiles.length > 0 && files.length > 1) {
+      return res.status(400).json({
+        status: "error",
+        message: "A document must be posted by itself. Remove the other attachments.",
       });
     }
 
@@ -95,9 +119,16 @@ exports.createPost = async (req, res) => {
       try {
         const uploads = await Promise.all(
           files.map(async (file) => {
-            const resourceType = file.mimetype.startsWith("video/")
-              ? "video"
-              : "image";
+            const isDocument = documentMimeTypes.has(file.mimetype);
+            const resourceType = isDocument
+              ? "raw"
+              : file.mimetype.startsWith("video/")
+                ? "video"
+                : "image";
+
+            const mediaType = isDocument
+              ? "document"
+              : resourceType;
 
             const result = await uploadBufferToCloudinary(
               file.buffer,
@@ -107,7 +138,7 @@ exports.createPost = async (req, res) => {
 
             return {
               url: result.secure_url,
-              type: resourceType,
+              type: mediaType,
               publicId: result.public_id,
             };
           })
@@ -187,6 +218,18 @@ exports.getFeed = async (req, res) => {
       ];
     }
 
+    const hiddenPosts = await HiddenPost.find({ userId })
+      .select("postId")
+      .lean();
+
+    const hiddenIds = hiddenPosts
+      .map((x) => String(x.postId))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (hiddenIds.length > 0) {
+      feedFilter._id = { $nin: hiddenIds };
+    }
+
     const posts = await Post.find(feedFilter)
       .sort({ score: -1, createdAt: -1 })
       .limit(50)
@@ -245,7 +288,11 @@ exports.getPostsByUser = async (req, res) => {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
 
-    const posts = await Post.find({ userId: String(userId), communityId: null })
+    const posts = await Post.find({
+      userId: String(userId),
+      communityId: null,
+      reshareOf: null,
+    })
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
@@ -346,7 +393,12 @@ exports.deletePost = async (req, res) => {
 
         try {
           await cloudinary.uploader.destroy(media.publicId, {
-            resource_type: media.type === "video" ? "video" : "image",
+            resource_type:
+              media.type === "document"
+                ? "raw"
+                : media.type === "video"
+                  ? "video"
+                  : "image",
           });
         } catch (cloudinaryError) {
           console.error(
@@ -534,3 +586,581 @@ exports.addComment = async (req, res) => {
     return res.status(500).json({ status: "error", message: "Error adding comment: " + error.message });
   }
 };
+
+/**
+ * GET /api/posts/liked
+ *
+ * Returns posts liked by the authenticated user.
+ * Liked posts are private to the authenticated user.
+ */
+exports.getLikedPosts = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    const requester = await User.findById(userId)
+      .select("universityId role deletedAt")
+      .lean();
+
+    if (!requester || requester.deletedAt) {
+      return res.status(404).json({
+        status: "error",
+        message: "User not found",
+      });
+    }
+
+    const likes = await Like.find({ userId: String(userId) })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .select("postId createdAt")
+      .lean();
+
+    const postIds = likes
+      .map((item) => String(item.postId))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (!postIds.length) {
+      return res.status(200).json({
+        status: "success",
+        count: 0,
+        data: [],
+      });
+    }
+
+    const filter = {
+      _id: { $in: postIds },
+      communityId: null,
+    };
+
+    if (getUserRole(req) !== "superadmin") {
+      filter.universityId = requester.universityId;
+    }
+
+    const posts = await Post.find(filter).lean();
+    const withAuthors = await attachAuthorNames(posts);
+    const byId = new Map(
+      withAuthors.map((post) => [String(post._id), post])
+    );
+
+    const data = postIds
+      .map((id) => byId.get(id))
+      .filter(Boolean)
+      .map((post) => ({
+        ...post,
+        liked: true,
+      }));
+
+    return res.status(200).json({
+      status: "success",
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Get liked posts error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to fetch liked posts",
+    });
+  }
+};
+
+
+/**
+ * POST /api/posts/reshare/:id
+ *
+ * Creates a lightweight Post document representing a reshare.
+ * The original post remains the source of truth.
+ */
+exports.resharePost = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid post id",
+      });
+    }
+
+    const [requester, original] = await Promise.all([
+      User.findById(userId)
+        .select("universityId role deletedAt")
+        .lean(),
+      Post.findById(id).lean(),
+    ]);
+
+    if (!requester || requester.deletedAt) {
+      return res.status(404).json({
+        status: "error",
+        message: "User not found",
+      });
+    }
+
+    if (!original) {
+      return res.status(404).json({
+        status: "error",
+        message: "Post not found",
+      });
+    }
+
+    if (original.communityId) {
+      return res.status(403).json({
+        status: "error",
+        message: "Community posts cannot be reshared",
+      });
+    }
+
+    if (
+      getUserRole(req) !== "superadmin" &&
+      String(original.universityId) !== String(requester.universityId)
+    ) {
+      return res.status(403).json({
+        status: "403",
+        message: "You cannot reshare this post",
+      });
+    }
+
+    if (String(original.userId) === String(userId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "You cannot reshare your own post",
+      });
+    }
+
+    const existing = await Post.findOne({
+      userId: String(userId),
+      reshareOf: String(id),
+    }).lean();
+
+    if (existing) {
+      return res.status(409).json({
+        status: "error",
+        message: "Post already reshared",
+        data: {
+          postId: String(id),
+          reshared: true,
+          reshare: existing,
+        },
+      });
+    }
+
+    const reshare = await Post.create({
+      userId: String(userId),
+      universityId: requester.universityId || null,
+      communityId: null,
+      title: "",
+      content: "",
+      media: [],
+      reshareOf: String(id),
+    });
+
+    return res.status(201).json({
+      status: "success",
+      message: "Post reshared successfully",
+      data: {
+        postId: String(id),
+        reshared: true,
+        reshare,
+      },
+    });
+  } catch (error) {
+    console.error("Reshare post error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to reshare post",
+    });
+  }
+};
+
+
+/**
+ * GET /api/posts/user/:userId/reshares
+ *
+ * Reshares are private to their owner.
+ * The returned collection contains the original posts, so the
+ * mobile profile can render the real content and navigate to it.
+ */
+exports.getResharesByUser = async (req, res) => {
+  try {
+    const requesterId = getUserId(req);
+    const { userId } = req.params;
+
+    if (!requesterId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid user id",
+      });
+    }
+
+    if (String(requesterId) !== String(userId)) {
+      return res.status(403).json({
+        status: "error",
+        message: "Reshares are private",
+      });
+    }
+
+    const requester = await User.findById(requesterId)
+      .select("universityId role deletedAt")
+      .lean();
+
+    if (!requester || requester.deletedAt) {
+      return res.status(404).json({
+        status: "error",
+        message: "User not found",
+      });
+    }
+
+    const reshares = await Post.find({
+      userId: String(userId),
+      reshareOf: { $ne: null },
+      communityId: null,
+    })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean();
+
+    const originalIds = reshares
+      .map((item) => String(item.reshareOf))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (!originalIds.length) {
+      return res.status(200).json({
+        status: "success",
+        count: 0,
+        data: [],
+      });
+    }
+
+    const originalFilter = {
+      _id: { $in: originalIds },
+      communityId: null,
+    };
+
+    if (getUserRole(req) !== "superadmin") {
+      originalFilter.universityId = requester.universityId;
+    }
+
+    const originals = await Post.find(originalFilter).lean();
+    const originalsWithAuthors = await attachAuthorNames(originals);
+
+    const originalMap = new Map(
+      originalsWithAuthors.map((post) => [String(post._id), post])
+    );
+
+    const data = reshares
+      .map((reshare) => originalMap.get(String(reshare.reshareOf)))
+      .filter(Boolean)
+      .map((post) => ({
+        ...post,
+        reshared: true,
+      }));
+
+    return res.status(200).json({
+      status: "success",
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Get user reshares error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to fetch reshares",
+    });
+  }
+};
+
+
+/**
+ * DELETE /api/posts/reshare/:id
+ *
+ * Here :id is the reshare Post document id.
+ */
+exports.deleteReshare = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid reshare id",
+      });
+    }
+
+    const result = await Post.findOneAndDelete({
+      _id: id,
+      userId: String(userId),
+      reshareOf: { $ne: null },
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: result ? "Reshare removed." : "Reshare was already removed.",
+      data: {
+        removed: Boolean(result),
+      },
+    });
+  } catch (error) {
+    console.error("Delete reshare error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to remove reshare",
+    });
+  }
+};
+
+
+/**
+ * POST /api/posts/hidden/:id
+ */
+exports.hidePost = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid post id",
+      });
+    }
+
+    const [requester, post] = await Promise.all([
+      User.findById(userId)
+        .select("universityId role deletedAt")
+        .lean(),
+      Post.findById(id).select("_id universityId communityId").lean(),
+    ]);
+
+    if (!requester || requester.deletedAt) {
+      return res.status(404).json({
+        status: "error",
+        message: "User not found",
+      });
+    }
+
+    if (!post) {
+      return res.status(404).json({
+        status: "error",
+        message: "Post not found",
+      });
+    }
+
+    if (post.communityId) {
+      return res.status(403).json({
+        status: "error",
+        message: "Community posts cannot be hidden here",
+      });
+    }
+
+    if (
+      getUserRole(req) !== "superadmin" &&
+      String(post.universityId) !== String(requester.universityId)
+    ) {
+      return res.status(403).json({
+        status: "error",
+        message: "You cannot hide this post",
+      });
+    }
+
+    await HiddenPost.updateOne(
+      {
+        userId: String(userId),
+        postId: String(id),
+      },
+      {
+        $setOnInsert: {
+          userId: String(userId),
+          postId: String(id),
+        },
+      },
+      {
+        upsert: true,
+      }
+    );
+
+    return res.status(200).json({
+      status: "success",
+      message: "Post hidden.",
+      data: {
+        postId: String(id),
+        hidden: true,
+      },
+    });
+  } catch (error) {
+    console.error("Hide post error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to hide post",
+    });
+  }
+};
+
+
+/**
+ * DELETE /api/posts/hidden/:id
+ */
+exports.unhidePost = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid post id",
+      });
+    }
+
+    await HiddenPost.deleteOne({
+      userId: String(userId),
+      postId: String(id),
+    });
+
+    return res.status(200).json({
+      status: "success",
+      message: "Post restored.",
+      data: {
+        postId: String(id),
+        hidden: false,
+      },
+    });
+  } catch (error) {
+    console.error("Unhide post error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to restore post",
+    });
+  }
+};
+
+
+/**
+ * GET /api/posts/hidden
+ */
+exports.getHiddenPosts = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        status: "error",
+        message: "Unauthorized",
+      });
+    }
+
+    const requester = await User.findById(userId)
+      .select("universityId role deletedAt")
+      .lean();
+
+    if (!requester || requester.deletedAt) {
+      return res.status(404).json({
+        status: "error",
+        message: "User not found",
+      });
+    }
+
+    const hidden = await HiddenPost.find({
+      userId: String(userId),
+    })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    const postIds = hidden
+      .map((item) => String(item.postId))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (!postIds.length) {
+      return res.status(200).json({
+        status: "success",
+        count: 0,
+        data: [],
+      });
+    }
+
+    const filter = {
+      _id: { $in: postIds },
+      communityId: null,
+    };
+
+    if (getUserRole(req) !== "superadmin") {
+      filter.universityId = requester.universityId;
+    }
+
+    const posts = await Post.find(filter).lean();
+    const withAuthors = await attachAuthorNames(posts);
+    const byId = new Map(
+      withAuthors.map((post) => [String(post._id), post])
+    );
+
+    const data = postIds
+      .map((id) => byId.get(id))
+      .filter(Boolean);
+
+    return res.status(200).json({
+      status: "success",
+      count: data.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Get hidden posts error:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to fetch hidden posts",
+    });
+  }
+};
+
+/**
+ * GET /api/posts/user/:userId/reshares
+ */

@@ -33,10 +33,20 @@ const documentFilter = (req, file, cb) => {
 // files, check Render's request limits before assuming this value
 // is wrong.
 const postMediaFilter = (req, file, cb) => {
-  if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+  const allowedDocuments = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ];
+
+  if (
+    file.mimetype.startsWith("image/") ||
+    file.mimetype.startsWith("video/") ||
+    allowedDocuments.includes(file.mimetype)
+  ) {
     cb(null, true);
   } else {
-    cb(new Error("Only image or video files are allowed"), false);
+    cb(new Error("Only image, video, PDF, DOC, or DOCX files are allowed"), false);
   }
 };
 

@@ -1,4 +1,6 @@
 const mongoose = require("mongoose");
+const Follow = require("../models/Follow");
+const Post = require("../models/Post");
 const bcryptjs = require("bcryptjs");
 const crypto = require("crypto");
 const Portfolio = require("../models/Portfolio");
@@ -111,9 +113,35 @@ exports.getUserSummary = async (req, res) => {
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
-    res
-      .status(200)
-      .json({ status: "success", data: { _id: user._id, name: user.name, role: user.role, avatarUrl: user.avatarUrl, bio: user.bio, username: user.username } });
+
+    const userId = String(user._id);
+
+    const [postsCount, followersCount, followingCount] = await Promise.all([
+      // Profile posts are the user's normal/main-feed posts.
+      // Community posts remain membership-gated and are not exposed
+      // through the public profile count.
+      Post.countDocuments({
+        userId,
+        communityId: null,
+      }),
+      Follow.countDocuments({ followingId: userId }),
+      Follow.countDocuments({ followerId: userId }),
+    ]);
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        _id: user._id,
+        name: user.name,
+        role: user.role,
+        avatarUrl: user.avatarUrl,
+        bio: user.bio,
+        username: user.username,
+        postsCount,
+        followersCount,
+        followingCount,
+      },
+    });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching user summary: " + error.message });
   }

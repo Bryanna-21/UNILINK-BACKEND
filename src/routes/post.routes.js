@@ -21,6 +21,17 @@ router.post("/", auth, uploadPostMedia, ctrl.createPost);
 // Like / unlike a post
 router.post("/like/:id", auth, ctrl.likePost);
 
+// Profile content
+router.get("/liked", auth, ctrl.getLikedPosts);
+router.get("/hidden", auth, ctrl.getHiddenPosts);
+
+router.post("/reshare/:id", auth, ctrl.resharePost);
+router.delete("/reshare/:id", auth, ctrl.deleteReshare);
+router.get("/user/:userId/reshares", auth, ctrl.getResharesByUser);
+
+router.post("/hidden/:id", auth, ctrl.hidePost);
+router.delete("/hidden/:id", auth, ctrl.unhidePost);
+
 // Comments — new backend work, the Comment model existed but had no
 // routes at all.
 router.get("/:id/comments", auth, ctrl.getComments);
