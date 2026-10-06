@@ -129,11 +129,20 @@ exports.getUserSummary = async (req, res) => {
 // a client accidentally or maliciously includes them in the body.
 exports.updateMyProfile = async (req, res) => {
   try {
-    const { name, bio, phone, admissionNumber } = req.body;
+    const { name, bio, phone, admissionNumber, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
     const update = {};
     if (name !== undefined) update.name = name;
     if (bio !== undefined) update.bio = bio;
     if (phone !== undefined) update.phone = phone;
+
+    // Cleaned values replace the raw ones above. The first bad field rejects the whole request.
+    const unitsRules = require("../utils/units.rules");
+    const checked = unitsRules.validateProfileFields({ name, bio, phone, programme, yearOfStudy, semester });
+    if (!checked.ok) {
+      return res.status(400).json({ status: "error", message: checked.message });
+    }
+    Object.assign(update, checked.update);
+    if (onboardingCompleted === true) update.onboardingCompletedAt = new Date();
 
     // admissionNumber is a one-time, institution-issued identifier —
     // once set, it locks server-side (not just hidden in the UI) so a
@@ -150,7 +159,7 @@ exports.updateMyProfile = async (req, res) => {
     }
 
     const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true }).select(
-      "name email role universityId bio phone avatarUrl coverUrl admissionNumber"
+      "name email role universityId bio phone avatarUrl coverUrl admissionNumber programme yearOfStudy semester onboardingCompletedAt"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });

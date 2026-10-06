@@ -19,6 +19,8 @@ const safetyRoutes = require("./routes/safety.routes");
 const messageRoutes = require("./routes/message.routes");
 const examRoutes = require("./routes/exam.routes");
 const followRoutes = require("./routes/follow.routes");
+const peopleRoutes = require("./routes/people.routes");
+const configRoutes = require("./routes/config.routes");
 const communityV2Routes = require("./routes/community_v2.routes");
 
 const app = express();
@@ -92,6 +94,8 @@ app.use("/api/courses", courseRoutes);
 app.use("/api/community", communityRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/follow", followRoutes);
+app.use("/api/people", peopleRoutes);
+app.use("/api/config", configRoutes);
 app.use("/api/communities", communityV2Routes);
 app.use("/api/events", eventRoutes);
 app.use("/api/marketplace", marketplaceRoutes);

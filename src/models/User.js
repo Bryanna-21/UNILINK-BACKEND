@@ -80,6 +80,19 @@ const userSchema = new mongoose.Schema({
   // that reference this user don't dangle. Null/absent = live account, so
   // existing documents need no migration.
   deletedAt: { type: Date, default: null },
+  // Academic profile, set during first-run setup. All optional; accounts that predate these
+  // fields simply don't have them. onboardingCompletedAt marks that setup was finished.
+  programme: { type: String, default: "" },
+  yearOfStudy: { type: Number, default: null },
+  semester: { type: Number, default: null },
+  onboardingCompletedAt: { type: Date, default: null },
+  // Public handle used to find and follow people. Stored lowercase only. Deliberately no
+  // default: accounts without one have no field at all, so the unique index below (which
+  // only covers string values) never collides on null.
+  username: { type: String },
+  usernameChangedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now }
 });
+// Unique across all accounts, but only for accounts that actually have a username.
+userSchema.index({ username: 1 }, { unique: true, partialFilterExpression: { username: { $type: "string" } } });
 module.exports = mongoose.model("User", userSchema);

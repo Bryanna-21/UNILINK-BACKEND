@@ -52,7 +52,7 @@ const userResponseShape = (user) => ({
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role universityId bio phone avatarUrl coverUrl username"
+      "name email role universityId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });

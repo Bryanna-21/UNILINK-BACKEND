@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const ctrl = require("../controllers/course.controller");
+const unitsCtrl = require("../controllers/units.controller");
 const resourcesCtrl = require("../controllers/resources.controller");
 const timetableCtrl = require("../controllers/timetable.controller");
 const attendanceCtrl = require("../controllers/attendance.controller");
@@ -7,10 +8,13 @@ const auth = require("../middleware/auth.middleware");
 const { uploadDocument } = require("../middleware/upload.middleware");
 
 // Courses
-router.get("/", auth, ctrl.getCourses);
+router.get("/", auth, unitsCtrl.list);
 router.post("/", auth, ctrl.createCourse);
-router.get("/:id", auth, ctrl.getCourseById);
-router.post("/:id/enroll", auth, ctrl.enrollInCourse);
+// /available must stay above /:id or "available" would be read as a course id.
+router.get("/available", auth, unitsCtrl.available);
+router.get("/:id", auth, unitsCtrl.getCourseById);
+router.post("/:id/enroll", auth, unitsCtrl.enroll);
+router.delete("/:id/enroll", auth, unitsCtrl.unenroll);
 router.get("/:courseId/students", auth, ctrl.getStudentsForCourse);
 
 // Units — Unit is a global catalog (superadmin-managed, see
