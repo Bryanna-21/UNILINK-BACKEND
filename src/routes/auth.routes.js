@@ -77,7 +77,12 @@ router.get("/me", authMiddleware, async (req, res) => {
 router.get("/universities", async (req, res) => {
   try {
     const University = require("../models/University");
-    const universities = await University.find({}).select("name").sort({ name: 1 });
+    const universities = await University.find({
+      country: "Kenya",
+      status: "active",
+    })
+      .select("name")
+      .sort({ name: 1 });
     res.status(200).json({ status: "success", data: universities });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching universities: " + error.message });
