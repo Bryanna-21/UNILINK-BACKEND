@@ -157,11 +157,27 @@ exports.getUserSummary = async (req, res) => {
 // a client accidentally or maliciously includes them in the body.
 exports.updateMyProfile = async (req, res) => {
   try {
-    const { name, bio, phone, admissionNumber, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
+    const { name, bio, phone, admissionNumber, universityId, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
     const update = {};
     if (name !== undefined) update.name = name;
     if (bio !== undefined) update.bio = bio;
     if (phone !== undefined) update.phone = phone;
+
+    // University is selected during academic onboarding and is used by
+    // /courses/available to scope the course catalogue.
+    if (universityId !== undefined) {
+      if (universityId !== null && typeof universityId !== "string") {
+        return res.status(400).json({ status: "error", message: "University ID must be text." });
+      }
+
+      const value = universityId === null ? "" : universityId.trim();
+
+      if (value.length > 100) {
+        return res.status(400).json({ status: "error", message: "University ID is invalid." });
+      }
+
+      update.universityId = value;
+    }
 
     // Cleaned values replace the raw ones above. The first bad field rejects the whole request.
     const unitsRules = require("../utils/units.rules");

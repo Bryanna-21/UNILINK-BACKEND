@@ -9,6 +9,10 @@ const {
   cloudinary,
 } = require("../config/cloudinary");
 
+const {
+  renderDocumentBuffer,
+} = require("../utils/documentRenderer");
+
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
 }
@@ -120,15 +124,52 @@ exports.createPost = async (req, res) => {
         const uploads = await Promise.all(
           files.map(async (file) => {
             const isDocument = documentMimeTypes.has(file.mimetype);
-            const resourceType = isDocument
-              ? "raw"
-              : file.mimetype.startsWith("video/")
-                ? "video"
-                : "image";
 
-            const mediaType = isDocument
-              ? "document"
-              : resourceType;
+            if (isDocument) {
+              const result = await uploadBufferToCloudinary(
+                file.buffer,
+                "unilink/posts",
+                "raw"
+              );
+
+              const rendered = await renderDocumentBuffer(
+                file.buffer,
+                file.mimetype,
+                file.originalname
+              );
+
+              const documentKey = result.public_id.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+              const pageUploads = [];
+
+              for (const page of rendered.pages) {
+                const pageResult = await uploadBufferToCloudinary(
+                  page.buffer,
+                  `unilink/posts/document-pages/${documentKey}`,
+                  "image"
+                );
+
+                pageUploads.push({
+                  page: page.page,
+                  url: pageResult.secure_url,
+                  publicId: pageResult.public_id,
+                });
+              }
+
+              return {
+                url: result.secure_url,
+                type: "document",
+                publicId: result.public_id,
+                mimeType: file.mimetype,
+                originalName: file.originalname || null,
+                pageCount: rendered.pageCount,
+                pages: pageUploads,
+              };
+            }
+
+            const resourceType = file.mimetype.startsWith("video/")
+              ? "video"
+              : "image";
 
             const result = await uploadBufferToCloudinary(
               file.buffer,
@@ -138,7 +179,7 @@ exports.createPost = async (req, res) => {
 
             return {
               url: result.secure_url,
-              type: mediaType,
+              type: resourceType,
               publicId: result.public_id,
             };
           })

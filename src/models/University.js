@@ -7,7 +7,7 @@ const universitySchema = new mongoose.Schema({
   // declared here — Mongoose's default strict mode silently dropped it
   // on save, so the duplicate check (`findOne({ email })`) was dead code
   // and every response lied about what was actually persisted.
-  email: { type: String, required: true, unique: true, trim: true, lowercase: true },
+  email: { type: String, required: false, unique: true, sparse: true, trim: true, lowercase: true },
   country: String,
   domainCode: String,
   // Added: same silent-drop issue as email. createUniversity has always

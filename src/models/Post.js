@@ -71,6 +71,42 @@ const postSchema = new mongoose.Schema({
         type: String,
         required: true,
       },
+
+      mimeType: {
+        type: String,
+        default: null,
+      },
+
+      originalName: {
+        type: String,
+        default: null,
+      },
+
+      pageCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      pages: [
+        {
+          page: {
+            type: Number,
+            required: true,
+            min: 1,
+          },
+
+          url: {
+            type: String,
+            required: true,
+          },
+
+          publicId: {
+            type: String,
+            required: true,
+          },
+        },
+      ],
     },
   ],
 
