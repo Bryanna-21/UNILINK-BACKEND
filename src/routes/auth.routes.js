@@ -142,26 +142,32 @@ router.post("/register", async (req, res) => {
       });
     }
 
-    if (!universityId || !campusId) {
+    if (!universityId) {
       return res.status(400).json({
         status: "error",
-        message: "University and campus are required",
+        message: "University is required",
       });
     }
 
-    const Campus = require("../models/Campus");
+    let selectedCampusId = null;
 
-    const campus = await Campus.findOne({
-      _id: campusId,
-      universityId,
-      status: "active",
-    }).select("_id");
+    if (campusId) {
+      const Campus = require("../models/Campus");
 
-    if (!campus) {
-      return res.status(400).json({
-        status: "error",
-        message: "Selected campus does not belong to the selected university or is inactive",
-      });
+      const campus = await Campus.findOne({
+        _id: campusId,
+        universityId,
+        status: "active",
+      }).select("_id");
+
+      if (!campus) {
+        return res.status(400).json({
+          status: "error",
+          message: "Selected campus does not belong to the selected university or is inactive",
+        });
+      }
+
+      selectedCampusId = campus._id;
     }
 
     // SECURITY: public registration can only ever create "student" accounts.
@@ -196,7 +202,7 @@ router.post("/register", async (req, res) => {
       email,
       password: hashedPassword,
       universityId,
-      campusId: campus._id,
+      campusId: selectedCampusId,
       role: requestedRole,
       ...usernameResult.fields,
     });
