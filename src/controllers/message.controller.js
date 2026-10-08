@@ -118,6 +118,28 @@ exports.startConversation = async (req, res) => {
   try {
     const { otherUserId, courseId, title } = req.body;
 
+    // Saved Messages / Message Yourself.
+    // A self conversation is its own type and contains exactly one
+    // participant: the authenticated user.
+    if (req.body.self === true) {
+      const existing = await Conversation.findOne({
+        type: "self",
+        participantIds: { $all: [req.user.id], $size: 1 },
+      });
+
+      if (existing) {
+        return res.status(200).json({ status: "success", data: existing });
+      }
+
+      const conversation = await Conversation.create({
+        type: "self",
+        participantIds: [req.user.id],
+        title: "Saved Messages",
+      });
+
+      return res.status(201).json({ status: "success", data: conversation });
+    }
+
     if (otherUserId) {
       // Validate the target before creating anything. Previously any
       // string was accepted: self-messages, nonexistent ids, deleted

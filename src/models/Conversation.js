@@ -11,7 +11,7 @@ const mongoose = require("mongoose");
 // name from). Creation is open to any authenticated user — there's
 // no enrollment concept to gate against for a standalone group.
 const conversationSchema = new mongoose.Schema({
-  type: { type: String, enum: ["direct", "course", "group"], default: "direct" },
+  type: { type: String, enum: ["direct", "course", "group", "self"], default: "direct" },
   participantIds: { type: [String], required: true },
   courseId: { type: String, default: null },
   title: { type: String, default: null },
