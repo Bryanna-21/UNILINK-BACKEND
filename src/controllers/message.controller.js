@@ -57,6 +57,32 @@ exports.getMyConversations = async (req, res) => {
       req.user.id
     );
 
+    // Resolve every participant name/role in one batched query so the
+    // mobile conversation list does not need one /profile/summary
+    // request per person.
+    const participantIds = [
+      ...new Set(
+        conversations.flatMap((conversation) =>
+          conversation.participantIds.filter((id) => String(id) !== String(req.user.id))
+        )
+      ),
+    ];
+
+    const participantUsers = participantIds.length
+      ? await User.find({ _id: { $in: participantIds } })
+          .select("_id name role")
+          .lean()
+      : [];
+
+    const participantById = {};
+    participantUsers.forEach((user) => {
+      participantById[String(user._id)] = {
+        id: String(user._id),
+        name: user.name || "Unknown User",
+        role: user.role || "student",
+      };
+    });
+
     // One most-recent message per conversation, for the list preview
     // (e.g. "James: Assignment is due..." or "Photo"). Fetched as a
     // single batched query rather than N queries per conversation —
@@ -81,6 +107,9 @@ exports.getMyConversations = async (req, res) => {
       return {
         ...c.toObject(),
         unreadCount: countByConversationId[c._id.toString()] || 0,
+        participantProfiles: c.participantIds
+          .map((id) => participantById[String(id)])
+          .filter(Boolean),
         // Derived, per-requesting-user flag — the raw pinnedBy array
         // is still included via ...c.toObject() above for anyone who
         // needs it, but the mobile list should only ever need to ask

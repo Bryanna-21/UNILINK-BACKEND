@@ -356,7 +356,7 @@ exports.getFeed = async (req, res) => {
     }
 
     const posts = await Post.find(feedFilter)
-      .sort({ score: -1, createdAt: -1 })
+      .sort({ createdAt: -1 })
       .limit(50)
       .lean();
 
