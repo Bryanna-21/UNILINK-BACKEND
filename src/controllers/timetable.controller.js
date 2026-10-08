@@ -31,6 +31,24 @@ exports.createTimetableEntry = async (req, res) => {
     if (!course) {
       return res.status(404).json({ status: "error", message: "Course not found" });
     }
+
+    const isLecturer = req.user.role === "lecturer";
+    const isAdmin = req.user.role === "admin";
+
+    if (isLecturer && course.lecturerId !== req.user.id) {
+      return res.status(403).json({
+        status: "error",
+        message: "You can only manage the timetable for courses assigned to you",
+      });
+    }
+
+    if (isAdmin && course.universityId !== req.user.universityId) {
+      return res.status(403).json({
+        status: "error",
+        message: "You can only manage timetables within your university",
+      });
+    }
+
     const { dayOfWeek, startTime, endTime, location } = req.body;
     if (!dayOfWeek || !startTime || !endTime) {
       return res.status(400).json({ status: "error", message: "dayOfWeek, startTime, and endTime are required" });
@@ -57,10 +75,35 @@ exports.deleteTimetableEntry = async (req, res) => {
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ status: "error", message: "Invalid timetable entry id" });
     }
-    const entry = await Timetable.findByIdAndDelete(req.params.id);
+    const entry = await Timetable.findById(req.params.id);
     if (!entry) {
       return res.status(404).json({ status: "error", message: "Timetable entry not found" });
     }
+
+    const course = await Course.findById(entry.courseId);
+    if (!course) {
+      return res.status(404).json({ status: "error", message: "Course not found" });
+    }
+
+    const isLecturer = req.user.role === "lecturer";
+    const isAdmin = req.user.role === "admin";
+
+    if (isLecturer && course.lecturerId !== req.user.id) {
+      return res.status(403).json({
+        status: "error",
+        message: "You can only manage the timetable for courses assigned to you",
+      });
+    }
+
+    if (isAdmin && course.universityId !== req.user.universityId) {
+      return res.status(403).json({
+        status: "error",
+        message: "You can only manage timetables within your university",
+      });
+    }
+
+    await entry.deleteOne();
+
     res.status(200).json({ status: "success", message: "Timetable entry deleted" });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error deleting timetable entry: " + error.message });

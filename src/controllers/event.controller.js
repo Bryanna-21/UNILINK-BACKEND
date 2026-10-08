@@ -7,7 +7,15 @@ const isStaff = (role) => role === "lecturer" || role === "admin";
 
 exports.getEvents = async (req, res) => {
   try {
-    const events = await Event.find({}).sort({ date: 1 });
+    if (!req.user.universityId) {
+      return res.status(400).json({ status: "error", message: "Your account is not linked to a university" });
+    }
+
+    const events = await Event.find({
+      universityId: req.user.universityId,
+      date: { $gte: new Date() },
+    }).sort({ date: 1 });
+
     res.status(200).json({ status: "success", count: events.length, data: events });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching events: " + error.message });
@@ -19,7 +27,10 @@ exports.getEventById = async (req, res) => {
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ status: "error", message: "Invalid event id" });
     }
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findOne({
+      _id: req.params.id,
+      universityId: req.user.universityId,
+    });
     if (!event) {
       return res.status(404).json({ status: "error", message: "Event not found" });
     }
@@ -34,11 +45,28 @@ exports.createEvent = async (req, res) => {
     if (!isStaff(req.user.role)) {
       return res.status(403).json({ status: "error", message: "Only lecturers or admins can create events" });
     }
-    const { title, description, date, location, capacity } = req.body;
-    if (!title || !date) {
-      return res.status(400).json({ status: "error", message: "title and date are required" });
+    if (!req.user.universityId) {
+      return res.status(400).json({ status: "error", message: "Your account is not linked to a university" });
     }
-    const event = await Event.create({ title, description, date, location, capacity, createdBy: req.user.id });
+
+    const { title, description, date, location, capacity } = req.body;
+
+    if (!title || !date || !location) {
+      return res.status(400).json({
+        status: "error",
+        message: "title, date, and location are required",
+      });
+    }
+
+    const event = await Event.create({
+      title: title.trim(),
+      description: description?.trim() || undefined,
+      date,
+      location: location.trim(),
+      capacity,
+      universityId: req.user.universityId,
+      createdBy: req.user.id,
+    });
     res.status(201).json({ status: "success", data: event });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error creating event: " + error.message });
@@ -50,7 +78,10 @@ exports.rsvpToEvent = async (req, res) => {
     if (!isValidId(req.params.id)) {
       return res.status(400).json({ status: "error", message: "Invalid event id" });
     }
-    const event = await Event.findById(req.params.id);
+    const event = await Event.findOne({
+      _id: req.params.id,
+      universityId: req.user.universityId,
+    });
     if (!event) {
       return res.status(404).json({ status: "error", message: "Event not found" });
     }
