@@ -494,7 +494,7 @@ exports.sendMessage = async (req, res) => {
     const message = await Message.create({
       conversationId: req.params.conversationId,
       senderId: req.user.id,
-      text,
+      text: text.trim(),
       readBy: [req.user.id],
     });
     conversation.lastMessageAt = new Date();
@@ -513,5 +513,157 @@ exports.sendMessage = async (req, res) => {
     res.status(201).json({ status: "success", data: message });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error sending message: " + error.message });
+  }
+};
+
+/**
+ * Edit a text message belonging to the current user.
+ * Attachments are intentionally not editable.
+ */
+exports.editMessage = async (req, res) => {
+  try {
+    const { conversationId, messageId } = req.params;
+    const { text } = req.body;
+
+    if (!isValidId(conversationId) || !isValidId(messageId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid conversation or message id",
+      });
+    }
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+      return res.status(403).json({
+        status: "error",
+        message: "Not a participant in this conversation",
+      });
+    }
+
+    if (!text || !text.trim()) {
+      return res.status(400).json({
+        status: "error",
+        message: "text is required",
+      });
+    }
+
+    const message = await Message.findOne({
+      _id: messageId,
+      conversationId,
+    });
+
+    if (!message) {
+      return res.status(404).json({
+        status: "error",
+        message: "Message not found",
+      });
+    }
+
+    if (message.senderId !== req.user.id) {
+      return res.status(403).json({
+        status: "error",
+        message: "You can only edit your own messages",
+      });
+    }
+
+    if (message.fileUrl) {
+      return res.status(400).json({
+        status: "error",
+        message: "File messages cannot be edited",
+      });
+    }
+
+    message.text = text.trim();
+    message.editedAt = new Date();
+    await message.save();
+
+    res.status(200).json({
+      status: "success",
+      data: message,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Error editing message: " + error.message,
+    });
+  }
+};
+
+/**
+ * Toggle/change the current user's reaction on a message.
+ *
+ * Same emoji  -> remove reaction.
+ * Different emoji -> replace existing reaction.
+ * No reaction -> add reaction.
+ */
+exports.toggleReaction = async (req, res) => {
+  try {
+    const { conversationId, messageId } = req.params;
+    const { emoji } = req.body;
+
+    if (!isValidId(conversationId) || !isValidId(messageId)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid conversation or message id",
+      });
+    }
+
+    const allowedEmojis = ["👍", "❤️", "😂", "😮", "😢", "😡"];
+
+    if (!allowedEmojis.includes(emoji)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Unsupported reaction",
+      });
+    }
+
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation || !conversation.participantIds.includes(req.user.id)) {
+      return res.status(403).json({
+        status: "error",
+        message: "Not a participant in this conversation",
+      });
+    }
+
+    const message = await Message.findOne({
+      _id: messageId,
+      conversationId,
+    });
+
+    if (!message) {
+      return res.status(404).json({
+        status: "error",
+        message: "Message not found",
+      });
+    }
+
+    const existingIndex = message.reactions.findIndex(
+      (reaction) => reaction.userId === req.user.id
+    );
+
+    if (existingIndex >= 0) {
+      if (message.reactions[existingIndex].emoji === emoji) {
+        message.reactions.splice(existingIndex, 1);
+      } else {
+        message.reactions[existingIndex].emoji = emoji;
+      }
+    } else {
+      message.reactions.push({
+        userId: req.user.id,
+        emoji,
+      });
+    }
+
+    await message.save();
+
+    res.status(200).json({
+      status: "success",
+      data: message,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: "Error updating reaction: " + error.message,
+    });
   }
 };

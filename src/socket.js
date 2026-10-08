@@ -1,28 +1,22 @@
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
+const Conversation = require("./models/Conversation");
 
 let io = null;
 
-// Attaches socket.io to the existing HTTP server created by app.listen()
-// in server.js — deliberately NOT a second server on a second port,
-// which would double CORS/deployment configuration for no benefit.
-//
-// Every socket must authenticate on connection with the same JWT used
-// for REST requests, and only admins are allowed to join the
-// "admins" room that admin-notification events are broadcast to.
-// An unauthenticated or non-admin socket is disconnected immediately —
-// this is a live admin-data feed, so it gets the same authorization
-// bar as the REST /api/admin/* routes (see role.middleware.js).
+// Attaches Socket.IO to the same HTTP server as the REST API.
+// REST remains the source of truth for persisted messages.
+// Socket.IO is used for ephemeral realtime events such as typing.
 function initSocketServer(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: "*", // matches the permissive REST CORS config in app.js;
-      // see final report notes on tightening this with a real origin allowlist.
+      origin: "*",
     },
   });
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
+
     if (!token) {
       return next(new Error("Authentication required"));
     }
@@ -37,28 +31,105 @@ function initSocketServer(httpServer) {
   });
 
   io.on("connection", (socket) => {
-    if (socket.user.role !== "admin") {
-      socket.disconnect(true);
-      return;
+    const userId = String(socket.user.id);
+
+    // Preserve the existing admin notification room.
+    if (socket.user.role === "admin") {
+      socket.join("admins");
     }
 
-    socket.join("admins");
+    // Join a conversation's private realtime room.
+    // Membership is checked against MongoDB before the socket is
+    // allowed into the room. This prevents users from listening to
+    // typing events for conversations they do not belong to.
+    socket.on("conversation:join", async (conversationId, callback) => {
+      try {
+        if (!conversationId) {
+          return callback?.({
+            ok: false,
+            message: "Conversation id is required",
+          });
+        }
 
-    socket.on("disconnect", () => {
-      // No explicit cleanup needed — socket.io removes the socket from
-      // all rooms automatically on disconnect.
+        const conversation = await Conversation.findById(conversationId)
+          .select("participantIds")
+          .lean();
+
+        if (!conversation) {
+          return callback?.({
+            ok: false,
+            message: "Conversation not found",
+          });
+        }
+
+        const isParticipant = conversation.participantIds.some(
+          (id) => String(id) === userId
+        );
+
+        if (!isParticipant) {
+          return callback?.({
+            ok: false,
+            message: "You are not a participant in this conversation",
+          });
+        }
+
+        const room = `conversation:${String(conversationId)}`;
+        socket.join(room);
+
+        return callback?.({ ok: true });
+      } catch (error) {
+        console.error("Socket conversation join error:", error);
+        return callback?.({
+          ok: false,
+          message: "Could not join conversation",
+        });
+      }
+    });
+
+    // Leave a conversation's realtime room.
+    socket.on("conversation:leave", (conversationId) => {
+      if (!conversationId) return;
+
+      const room = `conversation:${String(conversationId)}`;
+
+      socket.leave(room);
+    });
+
+    // Ephemeral typing event. Nothing is persisted.
+    // Only sockets that successfully joined the conversation may emit
+    // typing events into that conversation's room.
+    socket.on("typing:start", (conversationId) => {
+      if (!conversationId) return;
+
+      const room = `conversation:${String(conversationId)}`;
+
+      if (!socket.rooms.has(room)) return;
+
+      socket.to(room).emit("typing:start", {
+        conversationId: String(conversationId),
+        userId,
+      });
+    });
+
+    socket.on("typing:stop", (conversationId) => {
+      if (!conversationId) return;
+
+      const room = `conversation:${String(conversationId)}`;
+
+      if (!socket.rooms.has(room)) return;
+
+      socket.to(room).emit("typing:stop", {
+        conversationId: String(conversationId),
+        userId,
+      });
     });
   });
 
   return io;
 }
 
-// Called from controllers (see notifyAdmins.middleware.js) to push a
-// live event to every connected admin, in addition to the persisted
-// Notification document those admins will also see via REST on next
-// load/poll. If socket.io hasn't been initialized (e.g. during tests
-// that import controllers without booting the full server), this is a
-// harmless no-op rather than a crash.
+// Push a live event to connected admins.
+// Kept for the existing admin notification system.
 function emitToAdmins(event, payload) {
   if (!io) return;
   io.to("admins").emit(event, payload);
