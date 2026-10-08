@@ -60,8 +60,6 @@ exports.createPost = async (req, res) => {
       ? req.body.content.trim()
       : "";
 
-    // Title is optional. Content is optional too, as long as there is media: a post needs
-    // SOMETHING (text, a photo or a video), not a title.
     const files = req.files || [];
 
     if (!content && files.length === 0) {
@@ -85,9 +83,6 @@ exports.createPost = async (req, res) => {
       });
     }
 
-    // Uploads are buffered in memory. Keep videos to one per post and
-    // documents to one per post so large raw files cannot multiply memory
-    // and Cloudinary upload pressure.
     if (files.filter((f) => f.mimetype.startsWith("video/")).length > 1) {
       return res.status(400).json({
         status: "error",
@@ -101,7 +96,9 @@ exports.createPost = async (req, res) => {
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ]);
 
-    const documentFiles = files.filter((f) => documentMimeTypes.has(f.mimetype));
+    const documentFiles = files.filter((f) =>
+      documentMimeTypes.has(f.mimetype)
+    );
 
     if (documentFiles.length > 1) {
       return res.status(400).json({
@@ -113,60 +110,153 @@ exports.createPost = async (req, res) => {
     if (documentFiles.length > 0 && files.length > 1) {
       return res.status(400).json({
         status: "error",
-        message: "A document must be posted by itself. Remove the other attachments.",
+        message:
+          "A document must be posted by itself. Remove the other attachments.",
       });
     }
 
+    const requester = await User.findById(userId).select("universityId");
+
     let media = [];
 
-    if (files.length > 0) {
+    /*
+     * Documents are deliberately split into two phases:
+     *
+     * 1. Upload the original document and create the post immediately.
+     * 2. Render/upload preview pages after the response has been sent.
+     *
+     * This prevents LibreOffice/pdftoppm/page uploads from blocking the
+     * user's post creation request.
+     */
+    if (documentFiles.length > 0) {
+      const file = documentFiles[0];
+
       try {
-        const uploads = await Promise.all(
-          files.map(async (file) => {
-            const isDocument = documentMimeTypes.has(file.mimetype);
+        const result = await uploadBufferToCloudinary(
+          file.buffer,
+          "unilink/posts",
+          "raw"
+        );
 
-            if (isDocument) {
-              const result = await uploadBufferToCloudinary(
-                file.buffer,
-                "unilink/posts",
-                "raw"
-              );
+        media = [
+          {
+            url: result.secure_url,
+            type: "document",
+            publicId: result.public_id,
+            mimeType: file.mimetype,
+            originalName: file.originalname || null,
+            pageCount: 0,
+            processingStatus: "pending",
+            pages: [],
+          },
+        ];
 
-              const rendered = await renderDocumentBuffer(
-                file.buffer,
-                file.mimetype,
-                file.originalname
-              );
+        const post = await Post.create({
+          userId,
+          universityId: requester?.universityId || null,
+          title,
+          content,
+          media,
+        });
 
-              const documentKey = result.public_id.replace(/[^a-zA-Z0-9_-]/g, "_");
+        /*
+         * Do the expensive document work after the HTTP response has
+         * already been prepared. The original buffer remains available
+         * to this callback without another upload/download round trip.
+         */
+        setImmediate(async () => {
+          try {
+            const rendered = await renderDocumentBuffer(
+              file.buffer,
+              file.mimetype,
+              file.originalname
+            );
 
-              const pageUploads = [];
+            const documentKey = result.public_id.replace(
+              /[^a-zA-Z0-9_-]/g,
+              "_"
+            );
 
-              for (const page of rendered.pages) {
+            const pageUploads = await Promise.all(
+              rendered.pages.map(async (page) => {
                 const pageResult = await uploadBufferToCloudinary(
                   page.buffer,
                   `unilink/posts/document-pages/${documentKey}`,
                   "image"
                 );
 
-                pageUploads.push({
+                return {
                   page: page.page,
                   url: pageResult.secure_url,
                   publicId: pageResult.public_id,
-                });
+                };
+              })
+            );
+
+            await Post.updateOne(
+              {
+                _id: post._id,
+                "media.publicId": result.public_id,
+              },
+              {
+                $set: {
+                  "media.$.pageCount": rendered.pageCount,
+                  "media.$.pages": pageUploads,
+                  "media.$.processingStatus": "ready",
+                },
               }
+            );
 
-              return {
-                url: result.secure_url,
-                type: "document",
-                publicId: result.public_id,
-                mimeType: file.mimetype,
-                originalName: file.originalname || null,
-                pageCount: rendered.pageCount,
-                pages: pageUploads,
-              };
-            }
+            console.log(
+              `Document processing completed for post ${post._id}: ${rendered.pageCount} pages`
+            );
+          } catch (processingError) {
+            console.error(
+              `Document processing failed for post ${post._id}:`,
+              processingError.message
+            );
 
+            await Post.updateOne(
+              {
+                _id: post._id,
+                "media.publicId": result.public_id,
+              },
+              {
+                $set: {
+                  "media.$.processingStatus": "failed",
+                },
+              }
+            );
+          }
+        });
+
+        return res.status(201).json({
+          status: "success",
+          message: "Post created successfully",
+          data: post,
+        });
+      } catch (uploadError) {
+        console.error(
+          "Document upload failed:",
+          uploadError.message
+        );
+
+        return res.status(502).json({
+          status: "error",
+          message:
+            "The document could not be uploaded. Please try again.",
+        });
+      }
+    }
+
+    /*
+     * Images and videos keep the existing synchronous path. These do not
+     * require LibreOffice or page rendering, so the request remains simple.
+     */
+    if (files.length > 0) {
+      try {
+        const uploads = await Promise.all(
+          files.map(async (file) => {
             const resourceType = file.mimetype.startsWith("video/")
               ? "video"
               : "image";
@@ -200,12 +290,6 @@ exports.createPost = async (req, res) => {
       }
     }
 
-    // universityId looked up fresh from the DB, not trusted from
-    // req.user — the JWT payload only carries id/tokenVersion (see
-    // auth.middleware.js), so req.user.universityId has always been
-    // undefined here. This was silently writing universityId: null
-    // on every single post since this field was added.
-    const requester = await User.findById(userId).select("universityId");
     const post = await Post.create({
       userId,
       universityId: requester?.universityId || null,

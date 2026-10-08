@@ -88,6 +88,12 @@ const postSchema = new mongoose.Schema({
         min: 0,
       },
 
+      processingStatus: {
+        type: String,
+        enum: ["pending", "ready", "failed"],
+        default: "ready",
+      },
+
       pages: [
         {
           page: {
