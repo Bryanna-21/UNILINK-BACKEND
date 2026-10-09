@@ -77,15 +77,31 @@ router.get("/me", authMiddleware, async (req, res) => {
 router.get("/universities", async (req, res) => {
   try {
     const University = require("../models/University");
-    const universities = await University.find({
-      country: "Kenya",
-      status: "active",
-    })
-      .select("name")
+
+    const filter = { status: "active" };
+
+    const country =
+      typeof req.query.country === "string"
+        ? req.query.country.trim()
+        : "";
+
+    if (country) {
+      filter.country = country;
+    }
+
+    const universities = await University.find(filter)
+      .select("name country")
       .sort({ name: 1 });
-    res.status(200).json({ status: "success", data: universities });
+
+    res.status(200).json({
+      status: "success",
+      data: universities,
+    });
   } catch (error) {
-    res.status(500).json({ status: "error", message: "Error fetching universities: " + error.message });
+    res.status(500).json({
+      status: "error",
+      message: "Error fetching universities: " + error.message,
+    });
   }
 });
 
