@@ -162,11 +162,23 @@ exports.listUsers = async (req, res) => {
 // a definition neither side of the codebase has ever agreed on.
 exports.getDashboardStats = async (req, res) => {
   try {
-    const totalUsers = await User.countDocuments({});
+    // Counts by role so admins and the superadmin can see how many students, lecturers and
+    // admins there are, not just a single total. Open to admin and superadmin (route guard).
+    const [totalUsers, students, lecturers, admins, superadmins] = await Promise.all([
+      User.countDocuments({}),
+      User.countDocuments({ role: "student" }),
+      User.countDocuments({ role: "lecturer" }),
+      User.countDocuments({ role: "admin" }),
+      User.countDocuments({ role: "superadmin" }),
+    ]);
     res.json({
       status: "success",
       data: {
         totalUsers,
+        students,
+        lecturers,
+        admins,
+        superadmins,
         totalCommunities: null, // no single "community" concept exists yet to count
         reportedPosts: null, // no post-reporting/flagging system exists yet
       },
