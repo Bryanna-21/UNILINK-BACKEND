@@ -502,9 +502,14 @@ exports.deletePost = async (req, res) => {
     }
 
     const isAuthor = String(post.userId) === String(userId);
-    const isAdmin = role === "admin";
+    const isAdmin = role === "admin" || role === "superadmin";
+    const outOfScope =
+      role === "admin" &&
+      !!req.user.universityId &&
+      !!post.universityId &&
+      String(post.universityId) !== String(req.user.universityId);
 
-    if (!isAuthor && !isAdmin) {
+    if (!isAuthor && (!isAdmin || outOfScope)) {
       return res.status(403).json({
         status: "error",
         message: "You can only delete your own posts",

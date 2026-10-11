@@ -336,7 +336,7 @@ exports.getAnnouncements = async (req, res) => {
       requester?.role === "superadmin"
         ? {}
         : {
-            universityId: requester?.universityId,
+            universityId: { $in: [requester?.universityId, "GLOBAL"].filter(Boolean) },
             $or: [
               { campusId: null },
               ...(requester?.campusId ? [{ campusId: requester.campusId }] : []),

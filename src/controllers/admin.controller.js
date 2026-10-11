@@ -194,7 +194,7 @@ exports.getDashboardStats = async (req, res) => {
 
 exports.createAdmin = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, universityId } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: "Name, email, and password required" });
@@ -203,6 +203,14 @@ exports.createAdmin = async (req, res) => {
     const existing = await User.findOne({ email });
     if (existing) {
       return res.status(409).json({ message: "User with this email already exists" });
+    }
+
+    // An admin may be tied to one university; they can then only manage that university.
+    if (universityId) {
+      const mongoose = require("mongoose");
+      if (!mongoose.isValidObjectId(universityId) || !(await University.exists({ _id: universityId }))) {
+        return res.status(400).json({ message: "That university does not exist" });
+      }
     }
 
     const bcrypt = require("bcryptjs");
@@ -215,6 +223,7 @@ exports.createAdmin = async (req, res) => {
       role: "admin",
       status: "active",
       isVerified: true,
+      universityId: universityId || undefined,
     });
 
     await AuditLog.create({
@@ -260,7 +269,7 @@ exports.listAdmins = async (req, res) => {
 
     const total = await User.countDocuments(query);
     const admins = await User.find(query)
-      .select("_id name email role status createdAt")
+      .select("_id name email role status universityId createdAt")
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
@@ -273,6 +282,7 @@ exports.listAdmins = async (req, res) => {
         email: admin.email,
         role: admin.role,
         status: admin.status,
+        universityId: admin.universityId || null,
         createdAt: admin.createdAt,
       })),
       pagination: {
@@ -290,7 +300,7 @@ exports.listAdmins = async (req, res) => {
 exports.updateAdmin = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, status } = req.body;
+    const { name, email, status, universityId } = req.body;
 
     // Verify BEFORE modifying, not after: findByIdAndUpdate used to
     // run first and only check admin.role on the (already-updated)
@@ -302,11 +312,39 @@ exports.updateAdmin = async (req, res) => {
       return res.status(404).json({ message: "Admin not found" });
     }
 
-    const admin = await User.findByIdAndUpdate(
-      id,
-      { name, email, status },
-      { new: true }
-    ).select("_id name email role status updatedAt");
+    // Only the fields that were sent are changed; an undefined field must never blank a value.
+    const patch = {};
+    if (name !== undefined) patch.name = name;
+    if (email !== undefined) {
+      if (await User.findOne({ email, _id: { $ne: id } }).select("_id")) {
+        return res.status(409).json({ message: "User with this email already exists" });
+      }
+      patch.email = email;
+    }
+    if (status !== undefined) {
+      if (!["active", "suspended"].includes(status)) {
+        return res.status(400).json({ message: "Status must be active or suspended" });
+      }
+      patch.status = status;
+    }
+    if (universityId !== undefined) {
+      if (universityId === "" || universityId === null) {
+        patch.universityId = null;
+      } else {
+        const mongoose = require("mongoose");
+        if (!mongoose.isValidObjectId(universityId) || !(await University.exists({ _id: universityId }))) {
+          return res.status(400).json({ message: "That university does not exist" });
+        }
+        patch.universityId = universityId;
+      }
+    }
+    if (Object.keys(patch).length === 0) {
+      return res.status(400).json({ message: "Nothing to update" });
+    }
+
+    const admin = await User.findByIdAndUpdate(id, { $set: patch }, { new: true }).select(
+      "_id name email role status universityId updatedAt"
+    );
 
     await AuditLog.create({
       adminId: req.user.id,

@@ -74,6 +74,7 @@ const userSchema = new mongoose.Schema({
   coverUrl: { type: String, default: null },
   bio: { type: String, default: "" },
   phone: { type: String, default: "" },
+  department: { type: String, default: "" }, // lecturers: the department they teach in
   // Holds the new (already-hashed) password while a password-change
   // request is awaiting OTP confirmation. Set in
   // /request-password-change, promoted to `password` and cleared in
