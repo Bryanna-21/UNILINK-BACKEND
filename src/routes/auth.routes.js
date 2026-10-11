@@ -77,23 +77,71 @@ router.get("/me", authMiddleware, async (req, res) => {
 router.get("/universities", async (req, res) => {
   try {
     const University = require("../models/University");
+    const {
+      buildUniversitySearchFilters,
+    } = require("../utils/universitySearch");
 
-    const filter = { status: "active" };
+    // Keep the legacy list behavior for existing clients that do not
+    // provide a search term. New registration forms should pass ?search=.
+    if (!Object.prototype.hasOwnProperty.call(req.query, "search")) {
+      const filter = { status: "active" };
+      const country =
+        typeof req.query.country === "string"
+          ? req.query.country.trim()
+          : "";
 
-    const country =
-      typeof req.query.country === "string"
-        ? req.query.country.trim()
-        : "";
+      if (country) filter.country = country;
 
-    if (country) {
-      filter.country = country;
+      const universities = await University.find(filter)
+        .select("name country")
+        .sort({ name: 1 });
+
+      return res.status(200).json({
+        status: "success",
+        data: universities,
+      });
     }
 
-    const universities = await University.find(filter)
-      .select("name country")
-      .sort({ name: 1 });
+    const search =
+      typeof req.query.search === "string" ? req.query.search : "";
 
-    res.status(200).json({
+    const filters = buildUniversitySearchFilters(
+      search,
+      req.query.country
+    );
+
+    if (!filters.ok) {
+      return res.status(200).json({
+        status: "success",
+        data: [],
+      });
+    }
+
+    // Both searches are bounded. The first supports full-name prefixes;
+    // the second supports word prefixes such as "Nairobi" in
+    // "University of Nairobi". Country filtering applies to both.
+    const [nameMatches, tokenMatches] = await Promise.all([
+      University.find(filters.fullNameFilter)
+        .select("name country")
+        .sort({ nameSearch: 1 })
+        .limit(8)
+        .lean(),
+      University.find(filters.tokenFilter)
+        .select("name country")
+        .limit(8)
+        .lean(),
+    ]);
+
+    const unique = new Map();
+    for (const university of [...nameMatches, ...tokenMatches]) {
+      unique.set(String(university._id), university);
+    }
+
+    const universities = [...unique.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, 8);
+
+    return res.status(200).json({
       status: "success",
       data: universities,
     });

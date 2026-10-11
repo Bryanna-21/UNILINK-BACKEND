@@ -1,7 +1,11 @@
 const mongoose = require("mongoose");
+const { normalizeUniversityName, universitySearchTokens } = require("../utils/universitySearch");
 
 const universitySchema = new mongoose.Schema({
   name: { type: String, required: true },
+  // Populated on validation; existing records are handled by a separate backfill.
+  nameSearch: { type: String, default: undefined },
+  nameSearchTokens: { type: [String], default: undefined },
   // Added: admin.controller.js's createUniversity has always required,
   // duplicate-checked, and returned this field, but it was never
   // declared here — Mongoose's default strict mode silently dropped it
@@ -16,6 +20,14 @@ const universitySchema = new mongoose.Schema({
   status: { type: String, enum: ["active", "inactive"], default: "active" },
   verified: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
+});
+
+// Keep normalized search fields in sync whenever a university is validated.
+universitySchema.pre("validate", function () {
+  if (this.isModified("name") && this.name) {
+    this.nameSearch = normalizeUniversityName(this.name);
+    this.nameSearchTokens = universitySearchTokens(this.name);
+  }
 });
 
 // Case-insensitive uniqueness on name - "University of Nairobi" and
