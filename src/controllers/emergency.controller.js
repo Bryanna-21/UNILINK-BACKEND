@@ -160,6 +160,15 @@ exports.getAuthorizedReports = async (req, res) => {
     const includeHelpRequests = req.query.includeHelpRequests === "true";
     const excludedTypes = includeHelpRequests ? [] : EmergencyReport.NON_EMERGENCY_TYPES;
 
+    // Superadmin, and an admin not tied to a university, see every report. (The superadmin used to
+    // fall through to "not authorized".)
+    if (req.user.role === "superadmin" || (req.user.role === "admin" && !req.user.universityId)) {
+      const reports = await EmergencyReport.find({
+        ...(excludedTypes.length ? { type: { $nin: excludedTypes } } : {}),
+      }).sort({ createdAt: -1 });
+      return res.status(200).json({ status: "success", count: reports.length, data: reports });
+    }
+
     if (req.user.role === "admin") {
       const reports = await EmergencyReport.find({
         universityId: req.user.universityId,
@@ -226,7 +235,7 @@ const lecturerIsAuthorizedFor = async (report, userId, universityId) => {
 // event this audit trail exists to capture, more so than the
 // successful actions.
 const authorizeReportAction = async (req, res, report, action) => {
-  if (req.user.role !== "lecturer" && req.user.role !== "admin") {
+  if (!["lecturer", "admin", "superadmin"].includes(req.user.role)) {
     await logAction(req, {
       action,
       targetType: "EmergencyReport",
@@ -252,6 +261,23 @@ const authorizeReportAction = async (req, res, report, action) => {
       res.status(403).json({ status: "error", message: "You are not authorized to act on this report" });
       return false;
     }
+  }
+  // An admin tied to a university may only act on that university's reports.
+  if (
+    req.user.role === "admin" &&
+    req.user.universityId &&
+    report.universityId &&
+    String(report.universityId) !== String(req.user.universityId)
+  ) {
+    await logAction(req, {
+      action,
+      targetType: "EmergencyReport",
+      targetId: report._id,
+      result: "failure",
+      details: "Denied - report outside admin's university",
+    });
+    res.status(403).json({ status: "error", message: "You are not authorized to act on this report" });
+    return false;
   }
   return true;
 };

@@ -24,6 +24,7 @@ const configRoutes = require("./routes/config.routes");
 const staffChatRoutes = require("./routes/staffChat.routes");
 const adminExtrasRoutes = require("./routes/adminExtras.routes");
 const moderationAdminRoutes = require("./routes/moderationAdmin.routes");
+const adminOptionsRoutes = require("./routes/adminOptions.routes");
 const communityV2Routes = require("./routes/community_v2.routes");
 
 const app = express();
@@ -102,6 +103,7 @@ app.use("/api/config", configRoutes);
 app.use("/api/staff-chat", staffChatRoutes);
 app.use("/api/admin", adminExtrasRoutes);
 app.use("/api/admin/moderation", moderationAdminRoutes);
+app.use("/api/admin/options", adminOptionsRoutes);
 app.use("/api/communities", communityV2Routes);
 app.use("/api/events", eventRoutes);
 app.use("/api/marketplace", marketplaceRoutes);

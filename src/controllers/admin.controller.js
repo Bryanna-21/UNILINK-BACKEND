@@ -7,6 +7,7 @@ const Faculty = require("../models/Faculty");
 const Department = require("../models/Department");
 const Campus = require("../models/Campus");
 const Announcement = require("../models/Announcement");
+const mongoose = require("mongoose");
 
 // Search text from the query string goes into a regex: escape it so "(" or ".*" is
 // treated literally (prevents 500s and regex-denial-of-service).
