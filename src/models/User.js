@@ -89,6 +89,9 @@ const userSchema = new mongoose.Schema({
   // that reference this user don't dangle. Null/absent = live account, so
   // existing documents need no migration.
   deletedAt: { type: Date, default: null },
+  // Set when an admin removes a lecturer: ends access and keeps the record. Not a punishment and
+  // not appealable (unlike status "terminated"), and not an anonymization (unlike deletedAt).
+  removedAt: { type: Date, default: null },
   // Academic profile, set during first-run setup. All optional; accounts that predate these
   // fields simply don't have them. onboardingCompletedAt marks that setup was finished.
   programme: { type: String, default: "" },

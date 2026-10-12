@@ -56,7 +56,7 @@ const wrap = (fn) => async (req, res) => {
 
 const universityExists = async (id) => isId(id) && !!(await University.exists({ _id: id }));
 const emailTaken = (email, exceptId) =>
-  User.findOne({ email: new RegExp(`^${escapeRegex(email)}$`, "i"), ...(exceptId ? { _id: { $ne: exceptId } } : {}) }).select("_id role status");
+  User.findOne({ email: new RegExp(`^${escapeRegex(email)}$`, "i"), ...(exceptId ? { _id: { $ne: exceptId } } : {}) }).select("_id role status removedAt");
 
 // ---------- who am I / my scope ----------
 exports.getScope = wrap(async (req, res, actor) => {
@@ -78,7 +78,7 @@ exports.getStats = wrap(async (req, res, actor) => {
     await Promise.all([
       User.countDocuments({ ...scope }),
       User.countDocuments({ ...scope, role: "student" }),
-      User.countDocuments({ ...scope, role: "lecturer", status: { $ne: "terminated" } }),
+      User.countDocuments({ ...scope, role: "lecturer", removedAt: null }),
       User.countDocuments({ ...scope, role: { $in: ["admin", "superadmin"] } }),
       University.countDocuments(uniFilter),
       Unit.countDocuments({ ...scope }),
@@ -121,7 +121,7 @@ const lecturerView = (l) => ({
 exports.listLecturers = wrap(async (req, res, actor) => {
   const page = clampInt(req.query.page, 1, 1, 100000);
   const limit = clampInt(req.query.limit, 10, 1, 100);
-  const query = { role: "lecturer", status: { $ne: "terminated" }, ...scopeFilter(actor) };
+  const query = { role: "lecturer", removedAt: null, ...scopeFilter(actor) };
   const search = typeof req.query.search === "string" ? req.query.search.trim().slice(0, 60) : "";
   if (search) {
     const re = new RegExp(escapeRegex(search), "i");
@@ -150,8 +150,8 @@ exports.createLecturer = wrap(async (req, res, actor) => {
 
   const clash = await emailTaken(email);
   if (clash) {
-    return fail(res, 409, clash.role === "lecturer" && clash.status === "terminated"
-      ? "A lecturer with this email was removed earlier. Ask a superadmin to restore them."
+    return fail(res, 409, clash.role === "lecturer" && clash.removedAt
+      ? "A lecturer with this email was removed earlier and cannot be added again from here."
       : "An account with this email already exists.");
   }
   let lecturer;
@@ -170,7 +170,7 @@ exports.createLecturer = wrap(async (req, res, actor) => {
 
 async function loadLecturer(req, res, actor) {
   if (!isId(req.params.id)) { fail(res, 404, "Lecturer not found."); return null; }
-  const target = await User.findById(req.params.id).select("_id name email role status universityId department createdAt");
+  const target = await User.findById(req.params.id).select("_id name email role status removedAt universityId department createdAt");
   // Out-of-scope and wrong-role both look like "not found" so ids cannot be probed.
   if (!target || target.role !== "lecturer" || !inScope(actor, target.universityId)) { fail(res, 404, "Lecturer not found."); return null; }
   return target;
@@ -216,8 +216,8 @@ exports.updateLecturer = wrap(async (req, res, actor) => {
 exports.removeLecturer = wrap(async (req, res, actor) => {
   const target = await loadLecturer(req, res, actor);
   if (!target) return;
-  if (target.status !== "terminated") {
-    await User.updateOne({ _id: target._id }, { $set: { status: "terminated" }, $inc: { tokenVersion: 1 } });
+  if (!target.removedAt) {
+    await User.updateOne({ _id: target._id }, { $set: { removedAt: new Date() }, $inc: { tokenVersion: 1 } });
     await audit(actor, "LECTURER_REMOVE", "User", target._id, { email: target.email });
   }
   res.json({ status: "success", message: "Lecturer removed." });

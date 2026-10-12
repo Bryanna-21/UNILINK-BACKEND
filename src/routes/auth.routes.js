@@ -409,6 +409,15 @@ router.post("/login", async (req, res) => {
       });
     }
 
+    // An admin-removed account cannot sign in. Checked only after the password is correct, so
+    // login still never reveals whether an account exists.
+    if (user.removedAt) {
+      return res.status(403).json({
+        status: "error",
+        message: "This account was removed by your institution. If you think this is a mistake, contact your university administration.",
+      });
+    }
+
     // Signup verification gate — an unverified account cannot log in
     // at all, per the earlier design decision. Checked before the 2FA
     // branch below, since an unverified account shouldn't be able to

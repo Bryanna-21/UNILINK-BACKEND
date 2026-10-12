@@ -30,7 +30,7 @@ function createAuth({ jwt, User, now = () => new Date(), enforce = () => process
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        const user = await User.findById(decoded.id).select("tokenVersion status suspendedUntil deletedAt restrictions");
+        const user = await User.findById(decoded.id).select("tokenVersion status suspendedUntil deletedAt removedAt restrictions");
         if (!user || user.tokenVersion !== decoded.tokenVersion) {
           return res.status(401).json({ status: "error", message: "Session expired. Please login again." });
         }

@@ -165,6 +165,12 @@ function canEnforce({ role, action, severity }) {
 function accountBlock(user, now = new Date()) {
   if (!user) return { code: "ACCOUNT_NOT_FOUND", message: "Account not found." };
   if (user.deletedAt) return { code: "ACCOUNT_DELETED", message: "This account has been deleted." };
+  if (user.removedAt) {
+    return {
+      code: "ACCOUNT_REMOVED",
+      message: "This account was removed by your institution. If you think this is a mistake, contact your university administration.",
+    };
+  }
   if (user.status === "terminated") {
     return {
       code: "ACCOUNT_TERMINATED",
