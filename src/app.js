@@ -29,6 +29,7 @@ const opportunitiesRoutes = require("./routes/opportunities.routes");
 const adminOpportunitiesRoutes = require("./routes/adminOpportunities.routes");
 const schoolTimetableRoutes = require("./routes/schoolTimetable.routes");
 const schoolTimetableAdminRoutes = require("./routes/schoolTimetableAdmin.routes");
+const scheduleRoutes = require("./routes/schedule.routes");
 const communityV2Routes = require("./routes/community_v2.routes");
 
 const app = express();
@@ -112,6 +113,7 @@ app.use("/api/admin/opportunities", adminOpportunitiesRoutes);
 app.use("/api/opportunities", opportunitiesRoutes);
 app.use("/api/admin/timetables", schoolTimetableAdminRoutes);
 app.use("/api/school-timetables", schoolTimetableRoutes);
+app.use("/api/schedule", scheduleRoutes);
 app.use("/api/communities", communityV2Routes);
 app.use("/api/events", eventRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
