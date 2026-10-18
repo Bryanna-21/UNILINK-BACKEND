@@ -1,6 +1,6 @@
 const UserNotification = require("../models/UserNotification");
 const User = require("../models/User");
-const { sendPushNotification } = require("../utils/push.util");
+const { sendToTokens } = require("../services/push.service");
 
 // Generic per-user notification creator, mirroring
 // notifyAdmins.middleware.js's shape but for arbitrary
@@ -44,9 +44,12 @@ async function notifyUsers({ recipientIds, type, title, message, link, context =
     // recipient with no pushToken registered simply gets no push,
     // silently (see push.util.js's own skip-on-null-token behavior).
     const recipients = await User.find({ _id: { $in: uniqueIds } }).select("pushToken");
-    recipients.forEach((r) => {
-      if (r.pushToken) sendPushNotification(r.pushToken, { title, body: message, data: { type, link } });
-    });
+    // Batched, and never awaited: the person who triggered this must not wait for Expo.
+    sendToTokens(recipients.map((r) => r.pushToken), {
+      title,
+      body: message,
+      data: { type, link, ...(context.courseId ? { courseId: context.courseId } : {}) },
+    }).catch(() => {});
   } catch (error) {
     console.error("✗ Failed to notify user(s):", error.message);
   }

@@ -17,6 +17,7 @@ const Campus = require("../models/Campus");
 const Announcement = require("../models/Announcement");
 const AuditLog = require("../models/AuditLog");
 const EmergencyReport = require("../models/EmergencyReport");
+const { notifyAudienceInBackground } = require("../services/audience.notify");
 const {
   GLOBAL, escapeRegex, clampInt, cleanText, isValidEmail,
   resolveUniversity, scopeFilter, inScope, canPostGlobal, isUnassigned,
@@ -249,6 +250,10 @@ exports.createAnnouncement = wrap(async (req, res, actor) => {
   }
   const created = await Announcement.create({ title, body, universityId, campusId, postedBy: actor.id });
   await audit(actor, "ANNOUNCEMENT_CREATE", "Announcement", created._id, { title, universityId });
+  notifyAudienceInBackground({
+    universityId, campusId, roles: ["student", "lecturer"], type: "announcement",
+    title: `Announcement: ${title}`, message: body.length > 120 ? body.slice(0, 120) + "..." : body, link: "/announcements",
+  });
   res.status(201).json({ status: "success", message: "Announcement posted.", data: { id: created._id } });
 });
 

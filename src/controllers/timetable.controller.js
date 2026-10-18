@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Timetable = require("../models/Timetable");
 const TimetableOverride = require("../models/TimetableOverride");
 const Course = require("../models/Course");
+const { notifyScheduleChange } = require("../services/audience.notify");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -61,6 +62,7 @@ exports.createTimetableEntry = async (req, res) => {
       location,
       setByLecturerId: req.user.id,
     });
+    notifyScheduleChange(course);
     res.status(201).json({ status: "success", data: entry });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error creating timetable entry: " + error.message });
@@ -103,6 +105,7 @@ exports.deleteTimetableEntry = async (req, res) => {
     }
 
     await entry.deleteOne();
+    notifyScheduleChange(course);
 
     res.status(200).json({ status: "success", message: "Timetable entry deleted" });
   } catch (error) {

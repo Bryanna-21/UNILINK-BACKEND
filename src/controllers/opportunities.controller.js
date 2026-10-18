@@ -9,6 +9,7 @@ const AuditLog = require("../models/AuditLog");
 const FinancialOpportunity = require("../models/FinancialOpportunity");
 const { GLOBAL, clampInt, resolveUniversity, inScope, canPostGlobal, isUnassigned } = require("../utils/adminScope");
 const { TYPES, parseOpportunity } = require("../utils/opportunities.rules");
+const { notifyAudienceInBackground } = require("../services/audience.notify");
 
 const fail = (res, status, message) => res.status(status).json({ status: "error", message });
 const isId = (v) => mongoose.isValidObjectId(v);
@@ -63,6 +64,10 @@ exports.create = adminWrap(async (req, res, actor) => {
   }
   const created = await FinancialOpportunity.create({ ...parsed.value, universityId, postedBy: actor.id });
   await audit(actor, "OPPORTUNITY_CREATE", created._id, { type: created.type, title: created.title, universityId });
+  notifyAudienceInBackground({
+    universityId, roles: ["student"], type: "opportunity",
+    title: `New ${created.type}: ${created.title}`, message: `${created.provider}${created.amountText ? ` · ${created.amountText}` : ""}`, link: "/settings/financial-support",
+  });
   res.status(201).json({ status: "success", message: "Listing posted.", data: { id: created._id } });
 });
 
