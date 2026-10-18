@@ -64,3 +64,52 @@ test("votes: an objection needs a reason; an approval may have one", () => {
   assert.equal(t.parseVote(null).ok, false);
   assert.equal(t.parseVote({ vote: "approve", reason: "x".repeat(501) }).ok, false);
 });
+
+// ---- window and per-role tallies (timetable v2) ----------------------------------------------
+const DAY = 24 * 60 * 60 * 1000;
+const PUB = new Date("2026-11-02T09:00:00Z");
+
+test("publishing opens a 14 day window that closes by itself", () => {
+  assert.equal(t.windowCloseAt(PUB).toISOString(), "2026-11-16T09:00:00.000Z");
+  const tt = { status: "published", publishedAt: PUB, suggestionsCloseAt: t.windowCloseAt(PUB) };
+  assert.equal(t.isWindowOpen(tt, new Date(PUB.getTime() + 13 * DAY)), true);
+  assert.equal(t.isWindowOpen(tt, new Date(PUB.getTime() + 14 * DAY)), false, "closed at the exact close time");
+  assert.equal(t.isWindowOpen({ status: "draft" }, PUB), false);
+  assert.equal(t.isWindowOpen({ status: "finalized", publishedAt: PUB }, PUB), false);
+});
+
+test("an older record without a stored close time derives it from the publish time", () => {
+  assert.equal(t.closeAtOf({ status: "published", publishedAt: PUB }).toISOString(), "2026-11-16T09:00:00.000Z");
+  assert.equal(t.closeAtOf({ status: "draft" }), null);
+  assert.equal(t.isWindowOpen({ status: "published", publishedAt: PUB }, new Date(PUB.getTime() + DAY)), true);
+});
+
+test("finalizing waits for the window to close, so the two weeks are always honoured", () => {
+  const tt = { status: "published", publishedAt: PUB, suggestionsCloseAt: t.windowCloseAt(PUB) };
+  const early = t.canFinalize(tt, new Date(PUB.getTime() + 5 * DAY));
+  assert.equal(early.ok, false);
+  assert.equal(early.reason, "window_open");
+  assert.equal(early.closeAt.toISOString(), "2026-11-16T09:00:00.000Z");
+  assert.equal(t.canFinalize(tt, new Date(PUB.getTime() + 14 * DAY)).ok, true);
+  assert.equal(t.canFinalize({ status: "draft" }, PUB).reason, "not_published");
+  assert.equal(t.canFinalize({ status: "finalized", publishedAt: PUB }, PUB).reason, "not_published");
+});
+
+test("a revision guarantees at least 7 more days and never shortens an open window", () => {
+  const now = new Date("2026-11-14T09:00:00Z");
+  assert.equal(t.closeAtAfterRevision(new Date("2026-11-16T09:00:00Z"), now).toISOString(), "2026-11-21T09:00:00.000Z", "2 days left becomes 7");
+  assert.equal(t.closeAtAfterRevision(new Date("2026-11-30T09:00:00Z"), now).toISOString(), "2026-11-30T09:00:00.000Z", "a longer window is kept");
+  assert.equal(t.closeAtAfterRevision(null, now).toISOString(), "2026-11-21T09:00:00.000Z");
+});
+
+test("lecturers and students are counted separately", () => {
+  const votes = [
+    { vote: "approve", role: "lecturer" }, { vote: "object", role: "lecturer" },
+    { vote: "approve", role: "student" }, { vote: "approve", role: "student" }, { vote: "object", role: "student" },
+  ];
+  assert.deepEqual(t.tallyByRole(votes, { lecturer: 5, student: 100 }), {
+    lecturer: { approve: 1, object: 1, responded: 2, pending: 3 },
+    student: { approve: 2, object: 1, responded: 3, pending: 97 },
+  });
+  assert.deepEqual(t.tallyByRole([], { lecturer: 0, student: 0 }).student, { approve: 0, object: 0, responded: 0, pending: 0 });
+});

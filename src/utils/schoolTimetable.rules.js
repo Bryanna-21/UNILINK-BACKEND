@@ -86,4 +86,50 @@ function parseVote(body) {
   return { ok: true, vote, reason: reason || "" };
 }
 
-module.exports = { DAYS, STATUSES, MAX_ENTRIES, parseEntries, findConflicts, canEdit, versionAfterEdit, tally, parseVote };
+// ---- The suggestion window --------------------------------------------------------------------
+// Publishing opens a 14-day window in which lecturers and students of the university can comment
+// and vote. It closes by itself. A timetable cannot be finalized until the window has closed, so the
+// two weeks are always honoured. Revising a published timetable starts a new round of voting and
+// guarantees at least 7 more days to respond to the new version.
+const WINDOW_DAYS = 14;
+const REVISION_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const windowCloseAt = (publishedAt) => new Date(new Date(publishedAt).getTime() + WINDOW_DAYS * DAY_MS);
+
+// Older records have no stored close time; derive it from the publish time.
+function closeAtOf(t) {
+  if (t.suggestionsCloseAt) return new Date(t.suggestionsCloseAt);
+  return t.publishedAt ? windowCloseAt(t.publishedAt) : null;
+}
+
+function isWindowOpen(t, now = new Date()) {
+  const close = closeAtOf(t);
+  return t.status === "published" && !!close && now < close;
+}
+
+function canFinalize(t, now = new Date()) {
+  if (t.status !== "published") return { ok: false, reason: "not_published" };
+  const close = closeAtOf(t);
+  if (close && now < close) return { ok: false, reason: "window_open", closeAt: close };
+  return { ok: true };
+}
+
+function closeAtAfterRevision(current, now = new Date()) {
+  const minimum = new Date(now.getTime() + REVISION_DAYS * DAY_MS);
+  return current && new Date(current) > minimum ? new Date(current) : minimum;
+}
+
+// Votes carry the voter's role. counts = { lecturer, student } are the people who could vote.
+function tallyByRole(votes, counts) {
+  return {
+    lecturer: tally(votes.filter((v) => v.role === "lecturer"), counts.lecturer),
+    student: tally(votes.filter((v) => v.role === "student"), counts.student),
+  };
+}
+
+module.exports = {
+  DAYS, STATUSES, MAX_ENTRIES, WINDOW_DAYS, REVISION_DAYS,
+  parseEntries, findConflicts, canEdit, versionAfterEdit, tally, parseVote,
+  windowCloseAt, closeAtOf, isWindowOpen, canFinalize, closeAtAfterRevision, tallyByRole,
+};

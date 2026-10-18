@@ -12,6 +12,7 @@ router.put("/:id", ...guard, c.adminUpdate);
 router.post("/:id/publish", ...guard, c.adminPublish);
 router.post("/:id/finalize", ...guard, c.adminFinalize);
 router.post("/:id/comments", ...guard, c.adminComment);
+router.delete("/:id/comments/:commentId", ...guard, c.adminDeleteComment);
 router.delete("/:id", ...guard, c.adminDelete);
 
 module.exports = router;

@@ -26,6 +26,7 @@ const schema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now, index: true },
   publishedAt: { type: Date, default: null },
+  suggestionsCloseAt: { type: Date, default: null }, // 14 days after publishing; lecturers and students can respond until then
   finalizedAt: { type: Date, default: null },
   finalizedBy: { type: String, default: null },
 });

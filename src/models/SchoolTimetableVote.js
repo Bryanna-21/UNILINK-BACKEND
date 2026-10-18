@@ -6,6 +6,7 @@ const schema = new mongoose.Schema({
   version: { type: Number, required: true },
   userId: { type: String, required: true },
   userName: { type: String, default: "" },
+  role: { type: String, enum: ["lecturer", "student"], default: "lecturer" },
   vote: { type: String, enum: ["approve", "object"], required: true },
   reason: { type: String, default: "", maxlength: 500 },
   updatedAt: { type: Date, default: Date.now },
