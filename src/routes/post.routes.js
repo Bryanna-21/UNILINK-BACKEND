@@ -2,6 +2,7 @@ const router = require("express").Router();
 
 const ctrl = require("../controllers/post.controller");
 const auth = require("../middleware/auth.middleware");
+const { requireFeature } = require("../middleware/featureGuard");
 const { uploadPostMedia } = require("../middleware/upload.middleware");
 
 // ============================================================
@@ -12,7 +13,7 @@ const { uploadPostMedia } = require("../middleware/upload.middleware");
 router.get("/", auth, ctrl.getFeed);
 
 // Create a post
-router.post("/", auth, uploadPostMedia, ctrl.createPost);
+router.post("/", auth, requireFeature("posting"), uploadPostMedia, ctrl.createPost);
 
 // ============================================================
 // POST ACTIONS
@@ -35,14 +36,14 @@ router.delete("/hidden/:id", auth, ctrl.unhidePost);
 // Comments — new backend work, the Comment model existed but had no
 // routes at all.
 router.get("/:id/comments", auth, ctrl.getComments);
-router.post("/:id/comments", auth, ctrl.addComment);
+router.post("/:id/comments", auth, requireFeature("commenting"), ctrl.addComment);
 
 // ============================================================
 // BACKWARDS-COMPATIBLE ALIASES
 // ============================================================
 
 // Legacy create endpoint
-router.post("/create", auth, uploadPostMedia, ctrl.createPost);
+router.post("/create", auth, requireFeature("posting"), uploadPostMedia, ctrl.createPost);
 
 // Legacy feed endpoint
 router.get("/feed", auth, ctrl.getFeed);

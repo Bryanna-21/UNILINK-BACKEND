@@ -100,6 +100,9 @@ async function startServer() {
   // Initialize Socket.IO after the HTTP server exists.
   initSocketServer(server);
 
+  // Ends penalties whose time is up and lets unapproved account closures lapse.
+  require("./jobs/enforcementSweep").start();
+
   server.listen(PORT, () => {
     console.log("\n" + "=".repeat(60));
     console.log("✓ UniLink Backend Server Running Successfully");

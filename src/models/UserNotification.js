@@ -30,6 +30,7 @@ const userNotificationSchema = new mongoose.Schema({
       "timetable",
       "opportunity",
       "schedule_change",
+      "moderation",
     ],
     required: true,
   },

@@ -5,6 +5,7 @@ const resourcesCtrl = require("../controllers/resources.controller");
 const timetableCtrl = require("../controllers/timetable.controller");
 const attendanceCtrl = require("../controllers/attendance.controller");
 const auth = require("../middleware/auth.middleware");
+const { requireFeature } = require("../middleware/featureGuard");
 const { uploadDocument } = require("../middleware/upload.middleware");
 
 // Courses
@@ -50,11 +51,11 @@ router.get("/cats/:catId/my-result", auth, ctrl.getMyResultForCat);
 
 // Notes
 router.get("/:courseId/notes", auth, resourcesCtrl.getNotesForCourse);
-router.post("/:courseId/notes", auth, uploadDocument.single("file"), resourcesCtrl.uploadNote);
+router.post("/:courseId/notes", auth, requireFeature("uploads"), uploadDocument.single("file"), resourcesCtrl.uploadNote);
 
 // Past Papers
 router.get("/:courseId/past-papers", auth, resourcesCtrl.getPastPapersForCourse);
-router.post("/:courseId/past-papers", auth, uploadDocument.single("file"), resourcesCtrl.uploadPastPaper);
+router.post("/:courseId/past-papers", auth, requireFeature("uploads"), uploadDocument.single("file"), resourcesCtrl.uploadPastPaper);
 
 // Timetable
 router.get("/:courseId/timetable", auth, timetableCtrl.getTimetableForCourse);

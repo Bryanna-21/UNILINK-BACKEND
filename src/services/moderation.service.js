@@ -288,7 +288,8 @@ function createModerationService({ models, notifier = null, now = () => new Date
     const t = now();
     const user = await User.findById(userId).select("status suspendedUntil restrictions standardsAcceptedVersion deletedAt").lean();
     if (!user) throw new SafetyError(404, "Account not found.");
-    const actions = await ModerationAction.find({ userId: String(userId) }).sort({ createdAt: -1 }).limit(20).lean();
+    const actions = (await ModerationAction.find({ userId: String(userId) }).sort({ createdAt: -1 }).limit(20).lean())
+      .filter((a) => a.status !== "pending_approval" && a.status !== "rejected");
     const appeals = actions.length
       ? await Appeal.find({ userId: String(userId), actionId: { $in: actions.map((a) => String(a._id)) } }).lean()
       : [];
@@ -313,7 +314,7 @@ function createModerationService({ models, notifier = null, now = () => new Date
           reason: a.reason, policySection: a.policySection || null, startsAt: a.startsAt,
           expiresAt: a.expiresAt || null, status: a.status, createdAt: a.createdAt,
           appeal: appeal ? { status: appeal.status, decision: appeal.decision || null, decisionReason: appeal.decisionReason || "", decidedAt: appeal.decidedAt || null } : null,
-          canAppeal: R.appealEligibility({ action: a, existingAppeal: appeal, now: t }).ok,
+          canAppeal: require("../utils/enforcement.rules").appealable({ action: a, existingAppeal: appeal, now: t }).ok,
         };
       }),
     };

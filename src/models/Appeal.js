@@ -18,6 +18,8 @@ const appealSchema = new mongoose.Schema({
 
   status: { type: String, enum: R.APPEAL_STATUSES, default: "pending" },
   reviewerId: { type: String, default: null }, // never the moderator who imposed the action
+  universityId: { type: String, default: null }, // scopes the appeals queue like the report was
+  restrictedToSuperadmin: { type: Boolean, default: false },
   decision: { type: String, enum: ["upheld", "overturned", "reduced", null], default: null },
   decisionReason: { type: String, default: "", maxlength: 2000 }, // shown to the user
 
