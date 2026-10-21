@@ -43,6 +43,12 @@ const userResponseShape = (user) => ({
   universityId: user.universityId,
   campusId: user.campusId || null,
   username: user.username,
+  // Whether the student already finished academic setup. Without these, a fresh login looked like
+  // a brand-new account and the app asked for setup again every time.
+  programme: user.programme || null,
+  yearOfStudy: user.yearOfStudy ?? null,
+  semester: user.semester ?? null,
+  onboardingCompletedAt: user.onboardingCompletedAt || null,
 });
 
 // GET /api/auth/me — returns the current user's own profile fields.
