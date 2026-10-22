@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Follow = require("../models/Follow");
 const User = require("../models/User");
 const peopleService = require("../services/people.service");
+const postAccess = require("../services/postAccess.service");
 
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
@@ -81,9 +82,17 @@ exports.getFollowers = async (req, res) => {
       return res.status(400).json({ status: "error", message: "Invalid user id" });
     }
 
+    // Only people in the viewer's own university, and never across a block.
+    if (!(await postAccess.canViewUser(getUserId(req), userId))) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    const hiddenPeople = new Set(await postAccess.blockedIdsFor(getUserId(req)));
+
     const follows = await Follow.find({ followingId: userId }).sort({ createdAt: -1 }).lean();
     const followerIds = follows.map((f) => f.followerId);
-    const users = await User.find({ _id: { $in: followerIds } }).select("_id name username avatarUrl role").lean();
+    const users = (await User.find({ _id: { $in: followerIds } }).select("_id name username avatarUrl role").lean()).filter(
+      (u) => !hiddenPeople.has(String(u._id))
+    );
 
     return res.status(200).json({ status: "success", count: users.length, data: users });
   } catch (error) {
@@ -100,9 +109,17 @@ exports.getFollowing = async (req, res) => {
       return res.status(400).json({ status: "error", message: "Invalid user id" });
     }
 
+    // Only people in the viewer's own university, and never across a block.
+    if (!(await postAccess.canViewUser(getUserId(req), userId))) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    const hiddenPeople = new Set(await postAccess.blockedIdsFor(getUserId(req)));
+
     const follows = await Follow.find({ followerId: userId }).sort({ createdAt: -1 }).lean();
     const followingIds = follows.map((f) => f.followingId);
-    const users = await User.find({ _id: { $in: followingIds } }).select("_id name username avatarUrl role").lean();
+    const users = (await User.find({ _id: { $in: followingIds } }).select("_id name username avatarUrl role").lean()).filter(
+      (u) => !hiddenPeople.has(String(u._id))
+    );
 
     return res.status(200).json({ status: "success", count: users.length, data: users });
   } catch (error) {

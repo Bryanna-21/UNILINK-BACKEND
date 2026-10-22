@@ -4,6 +4,7 @@ const User = require("../models/User");
 const Comment = require("../models/Comment");
 const Like = require("../models/Like");
 const HiddenPost = require("../models/HiddenPost");
+const postAccess = require("../services/postAccess.service");
 const {
   uploadBufferToCloudinary,
   cloudinary,
@@ -355,6 +356,12 @@ exports.getFeed = async (req, res) => {
       feedFilter._id = { $nin: hiddenIds };
     }
 
+    // Anyone blocked either way is left out of the feed.
+    const blockedAuthors = await postAccess.blockedIdsFor(userId);
+    if (blockedAuthors.length > 0) {
+      feedFilter.userId = { $nin: blockedAuthors };
+    }
+
     const posts = await Post.find(feedFilter)
       .sort({ createdAt: -1 })
       .limit(50)
@@ -413,6 +420,10 @@ exports.getPostsByUser = async (req, res) => {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
 
+    if (!(await postAccess.canViewUser(requesterId, userId))) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
     const posts = await Post.find({
       userId: String(userId),
       communityId: null,
@@ -453,6 +464,14 @@ exports.getPostById = async (req, res) => {
     const post = await Post.findById(id).lean();
 
     if (!post) {
+      return res.status(404).json({
+        status: "error",
+        message: "Post not found",
+      });
+    }
+
+    // University, community membership and blocking. A refusal looks exactly like "no such post".
+    if (!(await postAccess.canViewPost(userId, post))) {
       return res.status(404).json({
         status: "error",
         message: "Post not found",
@@ -590,6 +609,10 @@ exports.likePost = async (req, res) => {
       });
     }
 
+    if (!(await postAccess.canViewPost(userId, post))) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+
     const existingLike = await Like.findOne({ userId, postId: id });
 
     if (existingLike) {
@@ -643,6 +666,11 @@ exports.getLikeStatus = async (req, res) => {
       return res.status(400).json({ status: "error", message: "Invalid post id" });
     }
 
+    const target = await Post.findById(id).select("userId universityId communityId").lean();
+    if (!target || !(await postAccess.canViewPost(userId, target))) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+
     const existing = await Like.findOne({ userId, postId: id }).select("_id").lean();
     return res.status(200).json({ status: "success", data: { liked: !!existing } });
   } catch (error) {
@@ -665,7 +693,16 @@ exports.getComments = async (req, res) => {
       return res.status(400).json({ status: "error", message: "Invalid post id" });
     }
 
-    const comments = await Comment.find({ postId }).sort({ createdAt: 1 }).lean();
+    // The hole this closes: comments used to be readable by anyone who knew a post id, from any
+    // university or private community. Now the viewer must be allowed to see the post itself.
+    const viewerId = getUserId(req);
+    const target = await Post.findById(postId).select("userId universityId communityId").lean();
+    if (!target || !(await postAccess.canViewPost(viewerId, target))) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+    const hidden = new Set(await postAccess.blockedIdsFor(viewerId));
+    const allComments = await Comment.find({ postId }).sort({ createdAt: 1 }).lean();
+    const comments = hidden.size ? allComments.filter((c) => !hidden.has(String(c.userId))) : allComments;
 
     const userIds = [...new Set(comments.map((c) => String(c.userId)))];
     const users = await User.find({ _id: { $in: userIds } }).select("_id name avatarUrl").lean();
@@ -696,6 +733,10 @@ exports.addComment = async (req, res) => {
 
     const post = await Post.findById(postId);
     if (!post) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+
+    if (!(await postAccess.canViewPost(getUserId(req), post))) {
       return res.status(404).json({ status: "error", message: "Post not found" });
     }
 
@@ -770,6 +811,11 @@ exports.getLikedPosts = async (req, res) => {
 
     if (getUserRole(req) !== "superadmin") {
       filter.universityId = requester.universityId;
+    }
+
+    const blockedLiked = await postAccess.blockedIdsFor(getUserId(req));
+    if (blockedLiked.length > 0) {
+      filter.userId = { $nin: blockedLiked };
     }
 
     const posts = await Post.find(filter).lean();
@@ -853,6 +899,10 @@ exports.resharePost = async (req, res) => {
         status: "error",
         message: "Community posts cannot be reshared",
       });
+    }
+
+    if (await postAccess.isBlockedEitherWay(userId, original.userId)) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
     }
 
     if (
@@ -988,6 +1038,10 @@ exports.getResharesByUser = async (req, res) => {
       _id: { $in: originalIds },
       communityId: null,
     };
+    const blockedOriginals = await postAccess.blockedIdsFor(getUserId(req));
+    if (blockedOriginals.length > 0) {
+      originalFilter.userId = { $nin: blockedOriginals };
+    }
 
     if (getUserRole(req) !== "superadmin") {
       originalFilter.universityId = requester.universityId;
@@ -1264,6 +1318,11 @@ exports.getHiddenPosts = async (req, res) => {
 
     if (getUserRole(req) !== "superadmin") {
       filter.universityId = requester.universityId;
+    }
+
+    const blockedLiked = await postAccess.blockedIdsFor(getUserId(req));
+    if (blockedLiked.length > 0) {
+      filter.userId = { $nin: blockedLiked };
     }
 
     const posts = await Post.find(filter).lean();

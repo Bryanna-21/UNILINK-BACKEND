@@ -5,6 +5,7 @@ const User = require("../models/User");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const Post = require("../models/Post");
+const postAccess = require("../services/postAccess.service");
 
 // Returns every community the requester should see: their own
 // university's university-wide community (always first, always
@@ -248,7 +249,11 @@ exports.getCommunityFeed = async (req, res) => {
       return res.status(403).json({ status: "error", message: "Join this community to see its feed" });
     }
 
-    const posts = await Post.find({ communityId: req.params.communityId })
+    const blockedInCommunity = await postAccess.blockedIdsFor(req.user.id);
+    const posts = await Post.find({
+      communityId: req.params.communityId,
+      ...(blockedInCommunity.length ? { userId: { $nin: blockedInCommunity } } : {}),
+    })
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();

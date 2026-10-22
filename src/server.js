@@ -103,6 +103,9 @@ async function startServer() {
   // Ends penalties whose time is up and lets unapproved account closures lapse.
   require("./jobs/enforcementSweep").start();
 
+  // Renders page images for older documents that have none (and retries failed renders).
+  require("./jobs/documentBackfillJob").start();
+
   server.listen(PORT, () => {
     console.log("\n" + "=".repeat(60));
     console.log("✓ UniLink Backend Server Running Successfully");

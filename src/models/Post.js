@@ -93,6 +93,8 @@ const postSchema = new mongoose.Schema({
         enum: ["pending", "ready", "failed"],
         default: "ready",
       },
+      // How many times the background job has tried to render this document (it stops after 3).
+      renderAttempts: { type: Number, default: 0 },
 
       pages: [
         {

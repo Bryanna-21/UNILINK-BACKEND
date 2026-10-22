@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const Portfolio = require("../models/Portfolio");
 const Achievement = require("../models/Achievement");
 const User = require("../models/User");
+const postAccess = require("../services/postAccess.service");
 const { uploadBufferToCloudinary } = require("../config/cloudinary");
 
 exports.getMyPortfolio = async (req, res) => {
@@ -85,6 +86,9 @@ exports.addCertificate = async (req, res) => {
 exports.getAchievementsForUser = async (req, res) => {
   try {
     const userId = req.params.userId || req.user.id;
+    if (String(userId) !== String(req.user.id) && !(await postAccess.canViewUser(req.user.id, userId))) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
     const achievements = await Achievement.find({ userId }).sort({ awardedAt: -1 });
     res.status(200).json({ status: "success", count: achievements.length, data: achievements });
   } catch (error) {
@@ -111,6 +115,11 @@ exports.getUserSummary = async (req, res) => {
     }
     const user = await User.findById(req.params.userId).select("name role avatarUrl bio username");
     if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    // This lookup is open across the platform by design (Messages resolves names with it), but a block
+    // still hides the person.
+    if (!(await postAccess.canViewUser(req.user.id, req.params.userId, { scopeUniversity: false }))) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
 
