@@ -12,6 +12,8 @@
     "seed:admin": "node scripts/seedAdmin.js",
     "check:duplicates": "node scripts/checkDuplicates.js",
     "check:suspended": "node scripts/checkSuspendedUsers.js",
+    "catalogue:dry-run": "node scripts/importCatalogueCandidates.js",
+    "catalogue:apply": "node scripts/importCatalogueCandidates.js --apply",
     "test": "node --test tests/*.test.js"
   },
   "dependencies": {

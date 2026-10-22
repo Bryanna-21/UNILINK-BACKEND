@@ -1,0 +1,32 @@
+[
+  {
+    "title": "Bachelor of Science in Computer Science",
+    "code": "CSC101",
+    "qualificationLevel": "degree",
+    "fieldOfStudy": "Computer Science",
+    "verificationStatus": "needs_official_verification",
+    "verificationSource": "https://www.admissions.unilag.edu.ng/programmes.html",
+    "universityId": "unilag",
+    "universityName": "University of Lagos",
+    "country": "Nigeria",
+    "sourceId": "unilag-programmes-2026",
+    "sourceType": "official",
+    "researchDate": "2026-10-22",
+    "evidenceNotes": "Admissions page lists programmes, requiring current verification against the official programme register."
+  },
+  {
+    "title": "Bachelor of Commerce",
+    "code": "BCOM",
+    "qualificationLevel": "degree",
+    "fieldOfStudy": "Business Administration",
+    "verificationStatus": "needs_official_verification",
+    "verificationSource": "https://www.uonbi.ac.ke/",
+    "universityId": "uon",
+    "universityName": "University of Nairobi",
+    "country": "Kenya",
+    "sourceId": "uon-portal-2026",
+    "sourceType": "official",
+    "researchDate": "2026-10-22",
+    "evidenceNotes": "Institution portal confirms broad academic offerings; official roster should be checked before final verification."
+  }
+]

@@ -1,0 +1,18 @@
+[
+  {
+    "sourceId": "unilag-programmes-2026",
+    "country": "Nigeria",
+    "sourceType": "official",
+    "title": "University of Lagos admissions programmes",
+    "url": "https://www.admissions.unilag.edu.ng/programmes.html",
+    "institution": "University of Lagos"
+  },
+  {
+    "sourceId": "uon-portal-2026",
+    "country": "Kenya",
+    "sourceType": "official",
+    "title": "University of Nairobi portal",
+    "url": "https://www.uonbi.ac.ke/",
+    "institution": "University of Nairobi"
+  }
+]
