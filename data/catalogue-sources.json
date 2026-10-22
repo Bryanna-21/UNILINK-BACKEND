@@ -1,0 +1,82 @@
+[
+  {
+    "sourceId": "cue-kenya-approved-universities",
+    "country": "Kenya",
+    "sourceType": "regulator",
+    "title": "Kenya Commission for University Education: approved universities",
+    "url": "https://www.cue.or.ke/",
+    "researchDate": "2026-10-22",
+    "status": "official_registry",
+    "notes": "Official Kenyan regulator for university approvals. Used as the primary authority for institution identity and country verification."
+  },
+  {
+    "sourceId": "nuc-nigeria-approved-universities",
+    "country": "Nigeria",
+    "sourceType": "regulator",
+    "title": "NUC Nigeria university and programme information",
+    "url": "https://enuc.nuc.gov.ng/nus",
+    "researchDate": "2026-10-22",
+    "status": "official_registry",
+    "notes": "Official Nigerian regulator entry point for university and programme approvals."
+  },
+  {
+    "sourceId": "unilag-admissions-programmes",
+    "country": "Nigeria",
+    "sourceType": "institution_website",
+    "title": "University of Lagos Admissions Programmes",
+    "url": "https://www.admissions.unilag.edu.ng/programmes.html",
+    "researchDate": "2026-10-22",
+    "status": "official_institution",
+    "notes": "Official university admissions programme page used to confirm the programme title and academic field."
+  },
+  {
+    "sourceId": "ui-homepage",
+    "country": "Nigeria",
+    "sourceType": "institution_website",
+    "title": "University of Ibadan institutional home",
+    "url": "https://ui.edu.ng/",
+    "researchDate": "2026-10-22",
+    "status": "official_institution",
+    "notes": "Institutional landing page used to confirm identity and the existence of public programme information."
+  },
+  {
+    "sourceId": "abu-homepage",
+    "country": "Nigeria",
+    "sourceType": "institution_website",
+    "title": "Ahmadu Bello University institutional home",
+    "url": "https://abu.edu.ng/",
+    "researchDate": "2026-10-22",
+    "status": "official_institution",
+    "notes": "Institutional home used to confirm official university identity and programme context."
+  },
+  {
+    "sourceId": "uon-homepage",
+    "country": "Kenya",
+    "sourceType": "institution_website",
+    "title": "University of Nairobi institutional home",
+    "url": "https://www.uonbi.ac.ke/",
+    "researchDate": "2026-10-22",
+    "status": "official_institution",
+    "notes": "Institutional home used to confirm university identity and public programme context."
+  },
+  {
+    "sourceId": "ku-homepage",
+    "country": "Kenya",
+    "sourceType": "institution_website",
+    "title": "Kenyatta University institutional home",
+    "url": "https://www.ku.ac.ke/",
+    "researchDate": "2026-10-22",
+    "status": "official_institution",
+    "notes": "Institutional site used to confirm public programme context and official academic identity."
+  },
+  {
+    "sourceId": "mu-homepage",
+    "country": "Kenya",
+    "sourceType": "institution_website",
+    "title": "Moi University institutional home",
+    "url": "https://www.mu.ac.ke/",
+    "researchDate": "2026-10-22",
+    "status": "official_institution",
+    "notes": "Institutional site used to confirm university identity and programme information context."
+  }
+]

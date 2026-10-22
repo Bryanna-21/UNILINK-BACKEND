@@ -1,0 +1,3 @@
+country,institutions,total_courses,zero_course_institutions,priority,notes
+Nigeria,124,0,124,P1,"All 124 Nigerian institutions had zero courses in the supplied snapshot; this report is therefore snapshot-based, not a live DB claim."
+Kenya,73,>=1,0,P2,"All 73 Kenyan institutions had at least one course in the supplied snapshot, so the report prioritises expansion and verification rather than zero-course remediation."

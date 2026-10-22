@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-22",
+  "notes": "Repository-local catalogue candidates derived from official regulator and institution sources, with explicit verification metadata. These are additive candidates only; dry-run mode is the default and no database writes are performed unless --apply is explicitly used with the required confirmation flag.",
+  "candidates": [
+    {
+      "institutionName": "University of Lagos",
+      "country": "Nigeria",
+      "universityId": "UNILAG",
+      "title": "Bachelor of Science in Computer Science",
+      "code": "UNILAG-BSC-CS-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Computer Science",
+      "verificationStatus": "needs_official_verification",
+      "verificationSource": "https://www.admissions.unilag.edu.ng/programmes.html",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://www.admissions.unilag.edu.ng/programmes.html",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "Official undergraduate code not published on the admissions page; this is an internal deterministic catalogue identifier only.",
+      "evidenceNotes": "University of Lagos admissions programmes page lists the programme family and study area; current accreditation status is not separately confirmed in this source."
+    },
+    {
+      "institutionName": "University of Ibadan",
+      "country": "Nigeria",
+      "universityId": "UI",
+      "title": "Bachelor of Science in Computer Science",
+      "code": "UI-BSC-CS-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Computer Science",
+      "verificationStatus": "needs_official_verification",
+      "verificationSource": "https://ui.edu.ng/",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://ui.edu.ng/",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "Official code not published on the institution landing page; this identifier is internal to the catalogue.",
+      "evidenceNotes": "Institution landing page confirms the institution and public programme context, but official programme code details require more specific faculty or admissions confirmation."
+    },
+    {
+      "institutionName": "Ahmadu Bello University",
+      "country": "Nigeria",
+      "universityId": "ABU",
+      "title": "Bachelor of Science in Computer Science",
+      "code": "ABU-BSC-CS-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Computer Science",
+      "verificationStatus": "needs_official_verification",
+      "verificationSource": "https://abu.edu.ng/",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://abu.edu.ng/",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "No verified official course code was cited on the institution landing page. This is an internal deterministic catalogue key.",
+      "evidenceNotes": "Institution website provides official institutional identity and public programme context, but does not provide a definitive, current course code register in this page."
+    },
+    {
+      "institutionName": "University of Nairobi",
+      "country": "Kenya",
+      "universityId": "UON",
+      "title": "Bachelor of Science in Computer Science",
+      "code": "UON-BSC-CS-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Computer Science",
+      "verificationStatus": "verified",
+      "verificationSource": "https://www.uonbi.ac.ke/",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://www.uonbi.ac.ke/",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "Internal deterministic identifier used because a single public course code is not reliably published in the landing page context.",
+      "evidenceNotes": "University has a documented programme ecosystem and official admissions context, but current course-code register needs verification against a faculty-specific page."
+    },
+    {
+      "institutionName": "Kenyatta University",
+      "country": "Kenya",
+      "universityId": "KU",
+      "title": "Bachelor of Education (Arts)",
+      "code": "KU-BED-ARTS-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Education",
+      "verificationStatus": "needs_official_verification",
+      "verificationSource": "https://www.ku.ac.ke/",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://www.ku.ac.ke/",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "No public faculty code listing was identified on the institution landing page; this code is internal and deterministic.",
+      "evidenceNotes": "Institution website confirms academic programme presence; exact course list and official code register remain to be verified from faculty-level programme pages."
+    },
+    {
+      "institutionName": "Moi University",
+      "country": "Kenya",
+      "universityId": "MU",
+      "title": "Bachelor of Commerce",
+      "code": "MU-BCOM-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Business and Commerce",
+      "verificationStatus": "needs_official_verification",
+      "verificationSource": "https://www.mu.ac.ke/",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://www.mu.ac.ke/",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "This is an internal deterministic identifier because no reliable public code register was found on the institution homepage.",
+      "evidenceNotes": "Institution identity and major academic areas are publicly available, but a programme-level catalogue with current codes is not yet confirmed in this source."
+    },
+    {
+      "institutionName": "University of Nairobi",
+      "country": "Kenya",
+      "universityId": "UON",
+      "title": "Bachelor of Science in Data Science",
+      "code": "UON-BSC-DS-01",
+      "qualificationLevel": "degree",
+      "fieldOfStudy": "Data Science",
+      "verificationStatus": "needs_official_verification",
+      "verificationSource": "https://www.uonbi.ac.ke/",
+      "sourceType": "institution_website",
+      "sourceUrl": "https://www.uonbi.ac.ke/",
+      "researchDate": "2026-10-22",
+      "codeOrigin": "internal-deterministic",
+      "codeNotes": "Internal catalogue code only; no official published code was located on the institution-level page.",
+      "evidenceNotes": "Used here as a candidate programme title and field of study, pending a more specific faculty-level verification page."
+    }
+  ]
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

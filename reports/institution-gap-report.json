@@ -1,0 +1,22 @@
+{
+  "snapshotDate": "2026-10-22",
+  "generatedFrom": "supplied_inventory_snapshot",
+  "countries": [
+    {
+      "country": "Nigeria",
+      "institutions": 124,
+      "existingCourses": 0,
+      "institutionsWithZeroCourses": 124,
+      "priority": "P1",
+      "notes": "All 124 Nigerian institutions had zero courses in the supplied snapshot; this does not claim the live database has the same state."
+    },
+    {
+      "country": "Kenya",
+      "institutions": 73,
+      "existingCourses": 73,
+      "institutionsWithZeroCourses": 0,
+      "priority": "P2",
+      "notes": "All 73 Kenyan institutions had at least one course in the supplied snapshot. The focus is on improving evidence quality and coverage verification."
+    }
+  ]
+}
