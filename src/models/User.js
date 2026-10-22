@@ -95,6 +95,7 @@ const userSchema = new mongoose.Schema({
   // Academic profile, set during first-run setup. All optional; accounts that predate these
   // fields simply don't have them. onboardingCompletedAt marks that setup was finished.
   programme: { type: String, default: "" },
+  courseId: { type: String, default: null },
   yearOfStudy: { type: Number, default: null },
   semester: { type: Number, default: null },
   onboardingCompletedAt: { type: Date, default: null },

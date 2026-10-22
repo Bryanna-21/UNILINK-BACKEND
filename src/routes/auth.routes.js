@@ -42,6 +42,7 @@ const userResponseShape = (user) => ({
   role: user.role,
   universityId: user.universityId,
   campusId: user.campusId || null,
+  courseId: user.courseId || null,
   username: user.username,
   // Whether the student already finished academic setup. Without these, a fresh login looked like
   // a brand-new account and the app asked for setup again every time.
@@ -60,7 +61,7 @@ const userResponseShape = (user) => ({
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role universityId campusId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt"
+      "name email role universityId campusId courseId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });

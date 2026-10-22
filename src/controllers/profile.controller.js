@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const Portfolio = require("../models/Portfolio");
 const Achievement = require("../models/Achievement");
 const User = require("../models/User");
+const Course = require("../models/Course");
 const postAccess = require("../services/postAccess.service");
 const { uploadBufferToCloudinary } = require("../config/cloudinary");
 
@@ -166,8 +167,12 @@ exports.getUserSummary = async (req, res) => {
 // a client accidentally or maliciously includes them in the body.
 exports.updateMyProfile = async (req, res) => {
   try {
-    const { name, bio, phone, admissionNumber, universityId, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
+    const { name, bio, phone, admissionNumber, universityId, courseId, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
     const update = {};
+    const currentUser = await User.findById(req.user.id).select("universityId courseId admissionNumber");
+    if (!currentUser) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
     if (name !== undefined) update.name = name;
     if (bio !== undefined) update.bio = bio;
     if (phone !== undefined) update.phone = phone;
@@ -188,8 +193,39 @@ exports.updateMyProfile = async (req, res) => {
       update.universityId = value;
     }
 
-    // Cleaned values replace the raw ones above. The first bad field rejects the whole request.
+    // Keep course selection tied to the effective institution.
     const unitsRules = require("../utils/units.rules");
+    const targetUniversityId = update.universityId !== undefined
+      ? update.universityId
+      : String(currentUser.universityId || "");
+
+    if (
+      universityId !== undefined &&
+      courseId === undefined &&
+      String(currentUser.universityId || "") !== String(update.universityId || "")
+    ) {
+      update.courseId = null;
+    }
+
+    if (courseId !== undefined) {
+      if (courseId === null || courseId === "") {
+        update.courseId = null;
+      } else {
+        if (typeof courseId !== "string" || !unitsRules.isObjectId(courseId)) {
+          return res.status(400).json({ status: "error", message: "Course ID is invalid." });
+        }
+        if (!targetUniversityId) {
+          return res.status(400).json({ status: "error", message: "Select an institution before selecting a course." });
+        }
+        const course = await Course.findById(courseId).select("_id universityId");
+        if (!course || String(course.universityId || "") !== String(targetUniversityId)) {
+          return res.status(400).json({ status: "error", message: "The selected course does not belong to this institution." });
+        }
+        update.courseId = String(course._id);
+      }
+    }
+
+    // Cleaned values replace the raw ones above. The first bad field rejects the whole request.
     const checked = unitsRules.validateProfileFields({ name, bio, phone, programme, yearOfStudy, semester });
     if (!checked.ok) {
       return res.status(400).json({ status: "error", message: checked.message });
@@ -205,14 +241,13 @@ exports.updateMyProfile = async (req, res) => {
     // than erroring, so an unaware client resubmitting the same form
     // doesn't get a spurious failure.
     if (admissionNumber !== undefined) {
-      const existing = await User.findById(req.user.id).select("admissionNumber");
-      if (existing && !existing.admissionNumber) {
+      if (!currentUser.admissionNumber) {
         update.admissionNumber = admissionNumber;
       }
     }
 
     const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true }).select(
-      "name email role universityId bio phone avatarUrl coverUrl admissionNumber programme yearOfStudy semester onboardingCompletedAt"
+      "name email role universityId courseId bio phone avatarUrl coverUrl admissionNumber programme yearOfStudy semester onboardingCompletedAt"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });

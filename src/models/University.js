@@ -13,6 +13,27 @@ const universitySchema = new mongoose.Schema({
   // and every response lied about what was actually persisted.
   email: { type: String, required: false, unique: true, sparse: true, trim: true, lowercase: true },
   country: String,
+  institutionType: {
+    type: String,
+    enum: [
+      "university",
+      "national_polytechnic",
+      "tvet_college",
+      "technical_institute",
+      "teacher_training_college",
+      "medical_training_college",
+      "other_tertiary",
+    ],
+  },
+  catalogueVerificationStatus: {
+    type: String,
+    enum: [
+      "verified",
+      "needs_client_verification",
+      "needs_official_verification",
+    ],
+  },
+  verificationSource: { type: String, default: null },
   domainCode: String,
   // Added: same silent-drop issue as email. createUniversity has always
   // written status: "active" and returned it, with nothing in the schema
