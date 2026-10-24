@@ -95,8 +95,10 @@ function createCatalogueCore({ repo }) {
         // one that someone already entered or verified.
         const units = t.curriculum ? curricula[t.curriculum] : null;
         if (!units) continue;
-        const isDry = dryRun || String(course._id).startsWith("dry-");
-        if (!isDry) {
+        // A course invented by this dry run has no database row to look at; any real course is checked, in a dry
+        // run too (reading is safe), so a dry run reports what a real run would do.
+        const invented = String(course._id).startsWith("dry-");
+        if (!invented) {
           const have = await repo.unitCodesOfCourse(String(course._id));
           if (have.length) { stats.units.coursesAlreadyHadUnits += 1; continue; }
         }
@@ -106,7 +108,7 @@ function createCatalogueCore({ repo }) {
           return v.value;
         });
         stats.units.created += prepared.length;
-        if (!isDry) await repo.insertUnits(String(course._id), String(inst._id), prepared, "catalogue-seed");
+        if (!dryRun && !invented) await repo.insertUnits(String(course._id), String(inst._id), prepared, "catalogue-seed");
       }
     }
     return stats;
