@@ -98,6 +98,8 @@ const userSchema = new mongoose.Schema({
   yearOfStudy: { type: Number, default: null },
   semester: { type: Number, default: null },
   onboardingCompletedAt: { type: Date, default: null },
+  // The course (programme) the student picked, validated against their institution. Stored as text like universityId.
+  courseId: { type: String, default: null },
   // Public handle used to find and follow people. Stored lowercase only. Deliberately no
   // default: accounts without one have no field at all, so the unique index below (which
   // only covers string values) never collides on null.

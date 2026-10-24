@@ -143,7 +143,7 @@ test("available: only the student's university, alphabetical, with isEnrolled an
   assert.equal(r.data[0].enrolledCount, 2);
   for (const c of r.data) {
     assert.equal(c.enrolledStudentIds, undefined);
-    assert.deepEqual(Object.keys(c).sort(), ["_id", "code", "description", "enrolledCount", "isEnrolled", "lecturerName", "title"]);
+    assert.deepEqual(Object.keys(c).sort(), ["_id", "code", "description", "durationYears", "enrolledCount", "isEnrolled", "lecturerName", "level", "title", "verificationStatus"]);
   }
 });
 

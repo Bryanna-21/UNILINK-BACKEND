@@ -6,6 +6,7 @@ const User = require("../models/User");
 const authMiddleware = require("../middleware/auth.middleware");
 const { createOtp, verifyOtp, sendOtpEmail } = require("../utils/otp.util");
 const peopleService = require("../services/people.service");
+const { resolveJwtExpiry } = require("../utils/tokenExpiry.rules");
 
 // Kept as the single source of truth for valid roles across the app
 // (used by scripts/seedAdmin.js). Not used to trust a client-supplied
@@ -31,7 +32,8 @@ const generateToken = (user) => {
       campusId: user.campusId || null,
     },
     process.env.JWT_SECRET,
-    { expiresIn: "24h" }
+    // Was a fixed "24h", which signed students out about once a day. JWT_EXPIRES_IN overrides; default 30 days.
+    { expiresIn: resolveJwtExpiry(process.env.JWT_EXPIRES_IN) }
   );
 };
 
@@ -49,6 +51,7 @@ const userResponseShape = (user) => ({
   yearOfStudy: user.yearOfStudy ?? null,
   semester: user.semester ?? null,
   onboardingCompletedAt: user.onboardingCompletedAt || null,
+  courseId: user.courseId || null,
 });
 
 // GET /api/auth/me — returns the current user's own profile fields.
@@ -60,7 +63,7 @@ const userResponseShape = (user) => ({
 router.get("/me", authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "name email role universityId campusId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt"
+      "name email role universityId campusId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt courseId"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });

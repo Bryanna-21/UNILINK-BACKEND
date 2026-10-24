@@ -15,7 +15,7 @@ function createUnitsCore({ repo, config = {} }) {
     exposeEnrolmentIds: false, // COURSES_EXPOSE_ENROLMENT_IDS=true restores full id lists for students
     unitEnrolmentEnabled: true, // FEATURE_UNIT_ENROLMENT=false switches enrol/unenrol off
     maxUnits: rules.MAX_ENROLLED_UNITS,
-    availableLimit: 40,
+    availableLimit: 100,
     ...config,
   };
 
@@ -71,6 +71,9 @@ function createUnitsCore({ repo, config = {} }) {
       lecturerName: nameOf.get(String(c.lecturerId)) || null,
       enrolledCount: (c.enrolledStudentIds || []).length,
       isEnrolled: rules.isEnrolledIn(c, me._id),
+      level: c.level || c.qualificationLevel || null,
+      durationYears: c.durationYears || null,
+      verificationStatus: c.verificationStatus === "verified" ? "verified" : "needs_verification",
     }));
     return ok({ count: data.length, data });
   }

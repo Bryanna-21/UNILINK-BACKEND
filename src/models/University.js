@@ -19,6 +19,14 @@ const universitySchema = new mongoose.Schema({
   // to receive it.
   status: { type: String, enum: ["active", "inactive"], default: "active" },
   verified: { type: Boolean, default: false },
+  // What kind of institution this is. Older records have none until the catalogue seed fills it in.
+  institutionType: {
+    type: String,
+    // The last three legacy spellings were written by an earlier session; they are read as their canonical types.
+    enum: ["university_public", "university_private", "national_polytechnic", "tvet_college", "teacher_training", "medical_training", "other_tertiary", "teacher_training_college", "medical_training_college", "technical_institute"],
+    default: null,
+  },
+  catalogueSource: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

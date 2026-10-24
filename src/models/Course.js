@@ -13,6 +13,14 @@ const courseSchema = new mongoose.Schema({
   // existing catalog units it covers. See course.controller.js's
   // attachUnit for how entries get added here.
   unitIds: { type: [String], default: [] },
+  // Catalogue metadata. Older courses have none of these until the catalogue seed fills them in.
+  level: { type: String, enum: ["certificate", "diploma", "higher_diploma", "degree", "postgraduate"], default: null },
+  durationYears: { type: Number, default: null, min: 1, max: 8 },
+  semestersPerYear: { type: Number, default: null, min: 1, max: 3 },
+  // "verified" only once a superadmin has confirmed the programme (and its units) against the institution.
+  // The two "needs_..." values below were written by an earlier session; anything but "verified" reads as unverified.
+  verificationStatus: { type: String, enum: ["verified", "needs_verification", "needs_client_verification", "needs_official_verification"], default: "needs_verification" },
+  catalogueSource: { type: String, default: null },
   createdAt: { type: Date, default: Date.now }
 });
 

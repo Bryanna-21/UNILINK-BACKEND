@@ -7,6 +7,10 @@ const Portfolio = require("../models/Portfolio");
 const Achievement = require("../models/Achievement");
 const User = require("../models/User");
 const postAccess = require("../services/postAccess.service");
+const University = require("../models/University");
+const universityLock = require("../utils/universityLock.rules");
+const academicProfile = require("../utils/academicProfile.rules");
+const Course = require("../models/Course");
 const { uploadBufferToCloudinary } = require("../config/cloudinary");
 
 exports.getMyPortfolio = async (req, res) => {
@@ -166,26 +170,36 @@ exports.getUserSummary = async (req, res) => {
 // a client accidentally or maliciously includes them in the body.
 exports.updateMyProfile = async (req, res) => {
   try {
-    const { name, bio, phone, admissionNumber, universityId, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
+    const { name, bio, phone, admissionNumber, universityId, courseId, programme, yearOfStudy, semester, onboardingCompleted } = req.body;
     const update = {};
     if (name !== undefined) update.name = name;
     if (bio !== undefined) update.bio = bio;
     if (phone !== undefined) update.phone = phone;
 
     // University is selected during academic onboarding and is used by
-    // /courses/available to scope the course catalogue.
+    // /courses/available to scope the course catalogue. It also decides what a user may see, so
+    // it can only be changed by a student who has not finished academic setup (see
+    // utils/universityLock.rules.js). Anything else is refused before anything is written.
+    let me = null;
+    if (universityId !== undefined || courseId !== undefined) {
+      me = await User.findById(req.user.id).select("role universityId courseId onboardingCompletedAt programme yearOfStudy semester");
+      if (!me) {
+        return res.status(404).json({ status: "error", message: "User not found" });
+      }
+    }
     if (universityId !== undefined) {
-      if (universityId !== null && typeof universityId !== "string") {
-        return res.status(400).json({ status: "error", message: "University ID must be text." });
+      const decision = universityLock.decideUniversityChange(me, universityId);
+      if (!decision.ok) {
+        return res.status(decision.status).json({ status: "error", message: decision.message });
       }
-
-      const value = universityId === null ? "" : universityId.trim();
-
-      if (value.length > 100) {
-        return res.status(400).json({ status: "error", message: "University ID is invalid." });
+      if (decision.change) {
+        if (!(await University.exists({ _id: decision.value }))) {
+          return res.status(400).json({ status: "error", message: "That university does not exist." });
+        }
+        update.universityId = decision.value;
+        // A campus belongs to one university, so the old one no longer applies.
+        update.campusId = null;
       }
-
-      update.universityId = value;
     }
 
     // Cleaned values replace the raw ones above. The first bad field rejects the whole request.
@@ -196,6 +210,27 @@ exports.updateMyProfile = async (req, res) => {
     }
     Object.assign(update, checked.update);
     if (onboardingCompleted === true) update.onboardingCompletedAt = new Date();
+
+    // Course: the student's chosen programme, which must belong to their institution (the new one if they switch
+    // in the same save). Switching institution clears the old course and programme, because both belong to the
+    // old institution. Year of study and semester are left alone. See utils/academicProfile.rules.js.
+    const universityChanged = update.universityId !== undefined;
+    if (courseId !== undefined) {
+      const wanted = typeof courseId === "string" ? courseId.trim() : courseId;
+      const effectiveUniversity = universityChanged ? update.universityId : me.universityId;
+      const course = typeof wanted === "string" && universityLock.isObjectId(wanted)
+        ? await Course.findById(wanted).select("universityId title")
+        : null;
+      const choice = academicProfile.decideCourseSelection({ user: me, courseId: wanted, course, universityId: effectiveUniversity });
+      if (!choice.ok) {
+        return res.status(choice.status).json({ status: "error", message: choice.message });
+      }
+      update.courseId = choice.courseId;
+      if (choice.courseId && update.programme === undefined) update.programme = course.title;
+    } else if (universityChanged) {
+      update.courseId = null;
+      if (update.programme === undefined) update.programme = "";
+    }
 
     // admissionNumber is a one-time, institution-issued identifier —
     // once set, it locks server-side (not just hidden in the UI) so a
@@ -212,10 +247,21 @@ exports.updateMyProfile = async (req, res) => {
     }
 
     const user = await User.findByIdAndUpdate(req.user.id, { $set: update }, { new: true }).select(
-      "name email role universityId bio phone avatarUrl coverUrl admissionNumber programme yearOfStudy semester onboardingCompletedAt"
+      "name email role universityId campusId bio phone avatarUrl coverUrl admissionNumber programme yearOfStudy semester onboardingCompletedAt courseId"
     );
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    if (update.universityId !== undefined) {
+      // Leaving an institution also leaves its courses, so the old institution's courses stop showing up.
+      try {
+        await Course.updateMany(
+          { enrolledStudentIds: String(req.user.id), universityId: { $nin: [String(update.universityId), null] } },
+          { $pull: { enrolledStudentIds: String(req.user.id) } }
+        );
+      } catch (cleanupError) {
+        console.error("Could not clear old-institution enrolments:", cleanupError.message);
+      }
     }
     res.status(200).json({ status: "success", data: user });
   } catch (error) {
