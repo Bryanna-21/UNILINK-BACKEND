@@ -43,7 +43,7 @@ function planKmtcConsolidation({ institutions, studentsByUni = {}, coursesByUni 
     const key = titleKey(campusName);
     const duplicateOf = seen.get(key) || null;
     if (!seen.has(key)) seen.set(key, campusName);
-    campuses.push({ recordId: id, recordName: i.name, campusName, action, blockers, coursesOnRecord: coursesByUni[id] || 0, duplicateOfCampus: duplicateOf });
+    campuses.push({ recordId: id, recordName: i.name, campusName, action, blockers, coursesOnRecord: coursesByUni[id] || 0, duplicateOfCampus: duplicateOf, ensureCampus: action !== "blocked" });
   }
   const count = (a) => campuses.filter((c) => c.action === a).length;
   return {

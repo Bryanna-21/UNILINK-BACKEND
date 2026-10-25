@@ -60,17 +60,25 @@ async function main() {
     for (const d of plan.campuses.filter((x) => x.duplicateOfCampus)) console.log(`  NOTE     "${d.recordName}" repeats the campus name "${d.duplicateOfCampus}"`);
     const withCourses = plan.campuses.filter((x) => x.action === "consolidate" && x.coursesOnRecord > 0);
     if (withCourses.length) console.log(`  NOTE     ${withCourses.length} record(s) carry courses of their own; they stay in the database but leave the picker.`);
+    // Every campus-record that is not blocked becomes a campus of the one KMTC institution, including records that were
+    // already deactivated by an earlier clean-up (those had no campus created for them).
+    const existing = new Set((await Campus.find({ universityId: plan.canonical.id }).select("name").lean()).map((c) => String(c.name).toLowerCase()));
+    const wanted = plan.campuses.filter((y) => y.ensureCampus);
+    const toCreate = wanted.filter((y) => !existing.has(y.campusName.toLowerCase()));
+    console.log(`  Campuses under "${plan.canonical.name}": ${existing.size} exist, ${toCreate.length} to create.`);
     if (apply) {
       let made = 0, retired = 0;
-      for (const x of plan.campuses.filter((y) => y.action === "consolidate")) {
+      for (const x of wanted) {
         const r = await Campus.updateOne(
           { universityId: plan.canonical.id, name: x.campusName },
           { $setOnInsert: { universityId: plan.canonical.id, name: x.campusName, status: "active" } },
           { upsert: true, collation: CI }
         );
         if (r.upsertedCount) made += 1;
-        const u = await University.updateOne({ _id: x.recordId, status: "active" }, { $set: { status: "inactive", catalogueSource: "consolidated-into-kmtc" } });
-        retired += u.modifiedCount || 0;
+        if (x.action === "consolidate") {
+          const u = await University.updateOne({ _id: x.recordId, status: "active" }, { $set: { status: "inactive", catalogueSource: "consolidated-into-kmtc" } });
+          retired += u.modifiedCount || 0;
+        }
       }
       console.log(`  written: ${made} campus(es) created, ${retired} record(s) set inactive.`);
     }

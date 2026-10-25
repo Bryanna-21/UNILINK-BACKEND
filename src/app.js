@@ -103,6 +103,7 @@ app.use("/api/posts", postRoutes);
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/catalogue", require("./routes/catalogue.routes"));
+app.use("/api/legal", require("./routes/legal.routes"));
 app.use("/api/community", communityRoutes);
 app.use("/api/exams", examRoutes);
 app.use("/api/follow", followRoutes);
