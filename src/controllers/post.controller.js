@@ -13,6 +13,7 @@ const {
 const {
   renderDocumentBuffer,
 } = require("../utils/documentRenderer");
+const { mapWithLimit } = require("../utils/mapWithLimit");
 
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
@@ -178,8 +179,11 @@ exports.createPost = async (req, res) => {
               "_"
             );
 
-            const pageUploads = await Promise.all(
-              rendered.pages.map(async (page) => {
+            // A few at a time: a long document must not start dozens of uploads at once.
+            const pageUploads = await mapWithLimit(
+              rendered.pages,
+              4,
+              async (page) => {
                 const pageResult = await uploadBufferToCloudinary(
                   page.buffer,
                   `unilink/posts/document-pages/${documentKey}`,
@@ -191,7 +195,7 @@ exports.createPost = async (req, res) => {
                   url: pageResult.secure_url,
                   publicId: pageResult.public_id,
                 };
-              })
+              }
             );
 
             await Post.updateOne(
