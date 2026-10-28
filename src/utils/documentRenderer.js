@@ -26,17 +26,26 @@ function isOfficeDocument(mimeType) {
   return OFFICE_MIME_TYPES.has(mimeType);
 }
 
+// LibreOffice keeps one shared user profile and locks it. Two conversions at the same moment (two
+// people posting Word files, or a post and the background job) make the second one fail or hang,
+// and that document is then left without page images. Giving every conversion its own profile
+// folder lets them run side by side.
+function libreOfficeArgs(inputPath, outputDir, profileDir) {
+  return [
+    `-env:UserInstallation=file://${profileDir}`,
+    "--headless",
+    "--convert-to",
+    "pdf",
+    "--outdir",
+    outputDir,
+    inputPath,
+  ];
+}
+
 async function convertOfficeToPdf(inputPath, outputDir) {
   await execFileAsync(
     "libreoffice",
-    [
-      "--headless",
-      "--convert-to",
-      "pdf",
-      "--outdir",
-      outputDir,
-      inputPath,
-    ],
+    libreOfficeArgs(inputPath, outputDir, path.join(outputDir, "lo-profile")),
     {
       timeout: 120000,
       maxBuffer: 1024 * 1024,
@@ -137,6 +146,7 @@ async function renderDocumentBuffer(
 }
 
 module.exports = {
+  libreOfficeArgs,
   DOCUMENT_MIME_TYPES,
   isSupportedDocumentMimeType,
   renderDocumentBuffer,
