@@ -5,6 +5,7 @@ const Comment = require("../models/Comment");
 const Like = require("../models/Like");
 const HiddenPost = require("../models/HiddenPost");
 const postAccess = require("../services/postAccess.service");
+const activity = require("../services/activity.notify");
 const {
   uploadBufferToCloudinary,
   cloudinary,
@@ -161,6 +162,8 @@ exports.createPost = async (req, res) => {
           media,
         });
 
+        activity.notifyPostMentions({ actorId: userId, post }); // not awaited
+
         /*
          * Do the expensive document work after the HTTP response has
          * already been prepared. The original buffer remains available
@@ -302,6 +305,8 @@ exports.createPost = async (req, res) => {
       content,
       media,
     });
+
+    activity.notifyPostMentions({ actorId: userId, post }); // not awaited
 
     return res.status(201).json({
       status: "success",
@@ -645,6 +650,9 @@ exports.likePost = async (req, res) => {
     post.score += 2;
     await post.save();
 
+    // Only a new like tells the author (and only once per person per post). Not awaited.
+    activity.notifyLike({ actorId: userId, post });
+
     return res.status(200).json({ status: "success", data: { post, liked: true } });
   } catch (error) {
     console.error("Like post error:", error);
@@ -750,6 +758,9 @@ exports.addComment = async (req, res) => {
     }
 
     const comment = await Comment.create({ postId, userId, content });
+
+    // Tells the post's author, and anyone @mentioned in the comment. Not awaited.
+    activity.notifyComment({ actorId: userId, post, comment });
 
     // Kept minimal on purpose: no author name attached to the create
     // response, since the caller already knows their own name — the
