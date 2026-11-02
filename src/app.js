@@ -116,6 +116,7 @@ app.use("/api/admin", adminExtrasRoutes);
 app.use("/api/admin/moderation", moderationAdminRoutes);
 app.use("/api/admin/moderation", enforcementAdminRoutes);
 app.use("/api/admin/options", adminOptionsRoutes);
+app.use("/api/admin/roles", require("./routes/roleAdmin.routes"));
 app.use("/api/admin/opportunities", adminOpportunitiesRoutes);
 app.use("/api/opportunities", opportunitiesRoutes);
 app.use("/api/admin/timetables", schoolTimetableAdminRoutes);
