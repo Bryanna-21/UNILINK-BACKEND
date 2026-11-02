@@ -34,7 +34,10 @@ function initSocketServer(httpServer) {
     const userId = String(socket.user.id);
 
     // Preserve the existing admin notification room.
-    if (socket.user.role === "admin") {
+    // Every user also has a private room, so an alert can go to exactly the right people.
+    socket.join(`user:${userId}`);
+
+    if (socket.user.role === "admin" || socket.user.role === "superadmin") {
       socket.join("admins");
     }
 
@@ -135,4 +138,12 @@ function emitToAdmins(event, payload) {
   io.to("admins").emit(event, payload);
 }
 
-module.exports = { initSocketServer, emitToAdmins };
+// Push a live event to specific users (their private rooms). Safe to call before the server starts.
+function emitToUsers(userIds, event, payload) {
+  if (!io || !Array.isArray(userIds)) return;
+  for (const id of userIds) {
+    io.to(`user:${String(id)}`).emit(event, payload);
+  }
+}
+
+module.exports = { initSocketServer, emitToAdmins, emitToUsers };

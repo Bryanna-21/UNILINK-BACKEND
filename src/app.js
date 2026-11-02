@@ -100,6 +100,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/ai", aiRoutes);
 app.use("/api/posts", postRoutes);
+// Ring routes first: they answer GET /contacts (country numbers) and GET /alerts/active.
+app.use("/api/emergency", require("./routes/emergencyRing.routes"));
 app.use("/api/emergency", emergencyRoutes);
 app.use("/api/courses", courseRoutes);
 app.use("/api/catalogue", require("./routes/catalogue.routes"));
@@ -124,6 +126,8 @@ app.use("/api/events", eventRoutes);
 app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/lost-and-found", lostAndFoundRoutes);
 app.use("/api/library", libraryRoutes);
+// Hardened add/remove for trusted contacts first (validated numbers, max 5, no duplicates).
+app.use("/api/profile", require("./routes/trustedContacts.routes"));
 app.use("/api/profile", profileRoutes);
 app.use("/api/safety", safetyRoutes);
 app.use("/api/safety", appealRoutes);

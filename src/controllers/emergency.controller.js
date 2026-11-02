@@ -6,6 +6,8 @@ const notifyAdmins = require("../middleware/notifyAdmins.middleware");
 const logAction = require("../middleware/auditLog.helper");
 const { sendSOSAlert } = require("../utils/sms.util");
 const { sendPushNotification } = require("../utils/push.util");
+const emergencyAlerts = require("../services/emergencyAlert.instance");
+const { normalizeContactPhones } = require("../utils/trustedContact.rules");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -75,12 +77,10 @@ exports.reportEmergency = async (req, res) => {
       priority: isSOS ? "high" : undefined,
     });
 
-    notifyAdmins({
-      type: isSOS ? "sos_alert" : "new_emergency_report",
-      title: isSOS ? `🚨 SOS Alert` : `New ${type} report`,
-      message: message ? message.slice(0, 140) : "No additional details provided.",
-      link: "/reports",
-    });
+    // Alerts only the admins responsible for this university, plus the superadmin and platform
+    // admins. An SOS also goes out live and as a loud push. Not awaited: the student's request must
+    // not wait on notifications, and this never throws.
+    emergencyAlerts.alertAdmins({ report, isSOS }).catch(() => {});
 
     // SOS-specific: notify the student's own trusted contacts and
     // confirm to the student's own device that the alert went out.
@@ -91,19 +91,23 @@ exports.reportEmergency = async (req, res) => {
     if (isSOS) {
       try {
         const reporter = await User.findById(req.user.id).select("name trustedContacts pushToken");
+        let smsSent = 0;
         if (reporter?.trustedContacts?.length) {
           const smsResults = await sendSOSAlert({
-            contacts: reporter.trustedContacts,
+            contacts: normalizeContactPhones(reporter.trustedContacts),
             studentName: reporter.name,
             location,
           });
           report.notifiedContacts = smsResults;
+          smsSent = smsResults.filter((r) => r.smsStatus === "sent").length;
           await report.save();
         }
         if (reporter?.pushToken) {
           sendPushNotification(reporter.pushToken, {
             title: "SOS Alert Sent",
-            body: "Your emergency alert has been sent to campus security and your trusted contacts.",
+            body: smsSent > 0
+              ? "Your emergency alert has been sent to campus admins and your trusted contacts."
+              : "Your emergency alert has been sent to campus admins.",
             data: { reportId: report._id.toString() },
           });
         }
