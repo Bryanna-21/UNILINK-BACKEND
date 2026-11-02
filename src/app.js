@@ -133,6 +133,7 @@ app.use("/api/profile", profileRoutes);
 app.use("/api/safety", safetyRoutes);
 app.use("/api/safety", appealRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/calls", require("./routes/call.routes"));
 app.use("/api/notifications", userNotificationRoutes);
 
 // ============================================================
