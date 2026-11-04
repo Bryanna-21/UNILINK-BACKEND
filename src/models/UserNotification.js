@@ -36,6 +36,8 @@ const userNotificationSchema = new mongoose.Schema({
       "post_like",
       "post_comment",
       "mention",
+      // An emergency was reported and you can help (see services/emergencyAlert.service.js).
+      "emergency_alert",
     ],
     required: true,
   },
@@ -54,6 +56,7 @@ const userNotificationSchema = new mongoose.Schema({
   // For activity notifications: who did it, and which post it is about.
   actorId: { type: String, default: null },
   postId: { type: String, default: null },
+  reportId: { type: String, default: null },
 
   read: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },

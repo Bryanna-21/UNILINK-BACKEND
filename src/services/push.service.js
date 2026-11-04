@@ -4,9 +4,9 @@
 // it never throws, so a push problem can never fail the action that triggered it.
 const { buildMessages, sendPushBatch } = require("../utils/pushBatch");
 
-async function sendToTokens(tokens, { title, body, data }) {
+async function sendToTokens(tokens, { title, body, data, channelId }) {
   try {
-    const messages = buildMessages(tokens, { title, body, data });
+    const messages = buildMessages(tokens, { title, body, data, channelId });
     if (!messages.length) return { sent: 0, failed: 0, invalidTokens: [] };
     const result = await sendPushBatch(messages);
     if (result.invalidTokens.length) {

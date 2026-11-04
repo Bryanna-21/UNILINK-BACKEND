@@ -3,8 +3,8 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { CATEGORIES, normalizeCategory, typeFilter, categoryOf, countsByCategory, extractMentions, snippet } = require("../src/utils/notification.rules");
 
-test("the five tabs", () => {
-  assert.deepEqual(CATEGORIES, ["all", "followers", "activity", "mentions", "updates"]);
+test("the categories: the five tabs, and updates, which only shows under All", () => {
+  assert.deepEqual(CATEGORIES, ["all", "followers", "activity", "mentions", "emergency", "updates"]);
 });
 
 test("an unknown or missing category means all", () => {
@@ -14,7 +14,7 @@ test("an unknown or missing category means all", () => {
 
 test("every tab filter keeps message notifications out", () => {
   assert.deepEqual(typeFilter("all"), { $nin: ["new_message"] });
-  for (const c of ["followers", "activity", "mentions", "updates"]) {
+  for (const c of ["followers", "activity", "mentions", "emergency", "updates"]) {
     assert.ok(!typeFilter(c).$in.includes("new_message"), c);
   }
 });
@@ -24,6 +24,7 @@ test("types land in the right tab, and messages in none", () => {
   assert.equal(categoryOf("post_like"), "activity");
   assert.equal(categoryOf("post_comment"), "activity");
   assert.equal(categoryOf("mention"), "mentions");
+  assert.equal(categoryOf("emergency_alert"), "emergency");
   assert.equal(categoryOf("grade_posted"), "updates");
   assert.equal(categoryOf("exam_published"), "updates");
   assert.equal(categoryOf("some_future_type"), "updates");
@@ -33,11 +34,12 @@ test("types land in the right tab, and messages in none", () => {
 test("unread counts per tab leave messages out of every count, including All", () => {
   const counts = countsByCategory([
     { _id: "new_follower", n: 2 }, { _id: "post_like", n: 3 }, { _id: "post_comment", n: 1 },
-    { _id: "mention", n: 4 }, { _id: "grade_posted", n: 5 }, { _id: "new_message", n: 9 },
+    { _id: "mention", n: 4 }, { _id: "grade_posted", n: 5 }, { _id: "emergency_alert", n: 2 }, { _id: "new_message", n: 9 },
   ]);
-  assert.deepEqual(counts, { all: 15, followers: 2, activity: 4, mentions: 4, updates: 5 });
-  assert.deepEqual(countsByCategory([]), { all: 0, followers: 0, activity: 0, mentions: 0, updates: 0 });
-  assert.deepEqual(countsByCategory(undefined), { all: 0, followers: 0, activity: 0, mentions: 0, updates: 0 });
+  assert.deepEqual(counts, { all: 17, followers: 2, activity: 4, mentions: 4, emergency: 2, updates: 5 });
+  const zero = { all: 0, followers: 0, activity: 0, mentions: 0, emergency: 0, updates: 0 };
+  assert.deepEqual(countsByCategory([]), zero);
+  assert.deepEqual(countsByCategory(undefined), zero);
 });
 
 test("mentions: names are found, lowercased and not repeated", () => {

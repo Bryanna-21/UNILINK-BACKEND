@@ -8,6 +8,8 @@ const Department = require("../models/Department");
 const Campus = require("../models/Campus");
 const Announcement = require("../models/Announcement");
 const mongoose = require("mongoose");
+const { scopeFilter } = require("../utils/adminScope");
+const { assignableRoles } = require("../utils/roleChange.rules");
 
 // Search text from the query string goes into a regex: escape it so "(" or ".*" is
 // treated literally (prevents 500s and regex-denial-of-service).
@@ -107,6 +109,9 @@ exports.listUsers = async (req, res) => {
       ];
     }
     if (role) query.role = role;
+    // An admin tied to a university sees that university's people only; a superadmin and a
+    // platform admin see everyone.
+    Object.assign(query, scopeFilter(req.user));
 
     const total = await User.countDocuments(query);
     const users = await User.find(query)
@@ -141,6 +146,12 @@ exports.listUsers = async (req, res) => {
         university: universityById.get(u.universityId) || null,
         status: u.status,
         createdAt: u.createdAt,
+        // The roles this person may be changed to by the one asking (see utils/roleChange.rules.js),
+        // so a screen offers only buttons that will work.
+        assignableRoles: assignableRoles({
+          actor: { id: String(req.user.id), role: req.user.role, universityId: req.user.universityId },
+          target: { id: String(u._id), role: u.role, status: u.status, universityId: u.universityId },
+        }),
       })),
     });
   } catch (error) {

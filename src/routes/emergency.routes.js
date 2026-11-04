@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const ctrl = require("../controllers/emergency.controller");
 const auth = require("../middleware/auth.middleware");
+const numbers = require("../controllers/emergencyNumbers.controller");
 
 // Student-facing
 router.post("/report", auth, ctrl.reportEmergency);
@@ -20,6 +21,11 @@ router.patch("/reports/:id/escalate", auth, ctrl.escalateReport);
 router.patch("/reports/:id/status", auth, ctrl.updateReportStatus);
 
 router.get("/contacts", auth, ctrl.getContacts);
+
+// The emergency numbers for the caller's country; a superadmin adds and edits other countries.
+router.get("/numbers", auth, numbers.getMyNumbers);
+router.get("/numbers/all", auth, numbers.listAll);
+router.put("/numbers", auth, numbers.setNumbers);
 router.post("/help", auth, ctrl.requestHelp);
 
 module.exports = router;

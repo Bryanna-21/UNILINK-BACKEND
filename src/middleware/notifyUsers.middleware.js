@@ -35,6 +35,9 @@ async function notifyUsers({
   postId = null,
   dedupe = false,
   inApp = true,
+  reportId = null,
+  channelId = null,
+  pushData = {},
 }) {
   try {
     const ids = Array.isArray(recipientIds) ? recipientIds : [recipientIds];
@@ -53,6 +56,7 @@ async function notifyUsers({
       examId: context.examId || null,
       actorId: actorId || null,
       postId: postId || null,
+      reportId: reportId || null,
     });
 
     if (inApp && dedupe) {
@@ -85,7 +89,8 @@ async function notifyUsers({
     sendToTokens(recipients.map((r) => r.pushToken), {
       title,
       body: message,
-      data: { type, link, ...(context.courseId ? { courseId: context.courseId } : {}) },
+      data: { type, link, ...(context.courseId ? { courseId: context.courseId } : {}), ...pushData },
+      channelId,
     }).catch(() => {});
   } catch (error) {
     console.error("✗ Failed to notify user(s):", error.message);

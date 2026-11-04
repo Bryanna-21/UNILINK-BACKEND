@@ -12,6 +12,8 @@
 // succeed even if SMS can't be sent, same rationale as
 // notifyAdmins.middleware.js swallowing its own failures.
 
+const { toE164 } = require("./phone.rules");
+
 let twilioClient = null;
 
 function getTwilioClient() {
@@ -44,8 +46,17 @@ async function sendSOSAlert({ contacts, studentName, location }) {
 
   const results = [];
   for (const contact of contacts) {
+    // Twilio only accepts international format (+254712345678). People save a number the way they
+    // dial it (0712 345 678), which Twilio refuses, so every number is put in that format first.
+    const to = toE164(contact.phone);
+    if (!to) {
+      console.error(`✗ Trusted contact has a number that cannot be texted: ${contact.phone}`);
+      results.push({ name: contact.name, phone: contact.phone, smsStatus: "failed" });
+      continue;
+    }
+
     try {
-      await client.messages.create({ body, from: fromNumber, to: contact.phone });
+      await client.messages.create({ body, from: fromNumber, to });
       results.push({ name: contact.name, phone: contact.phone, smsStatus: "sent" });
     } catch (error) {
       console.error(`✗ Failed to SMS trusted contact ${contact.phone}:`, error.message);
