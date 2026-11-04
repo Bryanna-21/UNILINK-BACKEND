@@ -38,7 +38,6 @@ const {
 } = require("../controllers/admin.controller");
 const { requireSuperadmin, requireAdminOrSuperadmin } = require("../middleware/roleGuard");
 const authenticate = require("../middleware/auth.middleware"); // Assuming you have auth middleware
-const { changeUserRole } = require("../controllers/userRole.controller");
 
 // ============================================================
 // USER DIRECTORY / DASHBOARD - Admin or Superadmin
@@ -65,10 +64,6 @@ router.get("/students/:id", authenticate, requireAdminOrSuperadmin, getStudent);
 // suspending an account is a state-changing action in the same class as
 // admin/unit create-delete below, not ordinary admin work.
 router.patch("/users/:id/status", authenticate, requireSuperadmin, updateUserStatus);
-
-// Change a person's role directly: an admin can make a student a lecturer; only a superadmin
-// can make admins. The rules are in utils/roleChange.rules.js and are enforced there, not here.
-router.patch("/users/:id/role", authenticate, requireAdminOrSuperadmin, changeUserRole);
 
 // ============================================================
 // ADMIN NOTIFICATIONS - Admin or Superadmin

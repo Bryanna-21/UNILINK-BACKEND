@@ -7,11 +7,7 @@
 //   followers  someone followed you
 //   activity   likes and comments on your posts
 //   mentions   someone @mentioned you in a post or a comment
-//   emergency  an emergency was reported and you can help (an SOS from a student whose emergency
-//              contact you are, or a report to an admin)
 //   updates    grades, assignments, exams, announcements, timetable, opportunities, moderation
-//              (the app shows five tabs: All, Followers, Likes & comments, Mentions & tags and
-//              Emergency; these still appear under All, and ?category=updates still works)
 //
 // Message notifications are NOT in the list at all: new messages show on the Messages screen
 // (unread counts), and still reach the phone as a push.
@@ -20,7 +16,6 @@ const CATEGORY_TYPES = {
   followers: ["new_follower"],
   activity: ["post_like", "post_comment"],
   mentions: ["mention"],
-  emergency: ["emergency_alert"],
   updates: [
     "grade_posted",
     "new_assignment",
@@ -58,7 +53,7 @@ function categoryOf(type) {
 
 // [{ _id: "post_like", n: 3 }, ...] (unread rows grouped by type) -> unread count per tab.
 function countsByCategory(rows) {
-  const counts = { all: 0, followers: 0, activity: 0, mentions: 0, emergency: 0, updates: 0 };
+  const counts = { all: 0, followers: 0, activity: 0, mentions: 0, updates: 0 };
   for (const row of rows || []) {
     const category = categoryOf(row._id);
     if (!category) continue;

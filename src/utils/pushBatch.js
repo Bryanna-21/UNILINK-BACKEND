@@ -14,11 +14,8 @@ const chunk = (arr, size = CHUNK_SIZE) => {
 const isExpoToken = (t) => typeof t === "string" && /^(ExponentPushToken|ExpoPushToken)\[[^\]\s]+\]$/.test(t);
 
 // One message per distinct, valid token. Anything else (null, a stale or hand-typed value) is dropped.
-// channelId (Android) picks the notification channel; the "emergency" channel is the loud one.
-function buildMessages(tokens, { title, body, data, channelId }) {
-  return [...new Set(tokens)]
-    .filter(isExpoToken)
-    .map((to) => ({ to, title, body, data, sound: "default", priority: "high", ...(channelId ? { channelId } : {}) }));
+function buildMessages(tokens, { title, body, data }) {
+  return [...new Set(tokens)].filter(isExpoToken).map((to) => ({ to, title, body, data, sound: "default", priority: "high" }));
 }
 
 // Expo answers a batch with one ticket per message, in order. "DeviceNotRegistered" means the app was
