@@ -3,6 +3,7 @@ const Follow = require("../models/Follow");
 const User = require("../models/User");
 const peopleService = require("../services/people.service");
 const postAccess = require("../services/postAccess.service");
+const activity = require("../services/activity.notify");
 
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
@@ -43,6 +44,9 @@ exports.followUser = async (req, res) => {
       }
       throw err;
     }
+
+    // Tells them, once: following again after an unfollow does not send a second alert.
+    activity.notifyFollow({ followerId, followingId });
 
     return res.status(201).json({ status: "success", message: "Now following user" });
   } catch (error) {

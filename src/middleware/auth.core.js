@@ -27,9 +27,21 @@ function createAuth({ jwt, User, now = () => new Date(), enforce = () => process
       }
       const token = header.replace("Bearer ", "");
 
+      // 1. Is the token itself good? Only THIS can say "Invalid token".
+      let decoded;
       try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        decoded = jwt.verify(token, process.env.JWT_SECRET);
+      } catch (error) {
+        return res.status(401).json({ status: "error", message: "Invalid token" });
+      }
 
+      // 2. Everything after that (the database lookup, the standing check) can fail for reasons
+      //    that have nothing to do with the person's session: the server has just restarted for
+      //    an update, the database is still reconnecting, a query timed out. That used to be
+      //    answered with the same 401 "Invalid token", and the apps delete the saved login on
+      //    that message, so every backend update signed everybody out. It is now a 503 ("try
+      //    again"), which the apps treat as a hiccup and leave the session alone.
+      try {
         const user = await User.findById(decoded.id).select("tokenVersion status suspendedUntil deletedAt removedAt restrictions");
         if (!user || user.tokenVersion !== decoded.tokenVersion) {
           return res.status(401).json({ status: "error", message: "Session expired. Please login again." });
@@ -52,7 +64,16 @@ function createAuth({ jwt, User, now = () => new Date(), enforce = () => process
         req.account = { block, restrictions: activeRestrictions(user, t) };
         next();
       } catch (error) {
-        return res.status(401).json({ status: "error", message: "Invalid token" });
+        // A validly signed token carrying a malformed id is a bad token, not an outage.
+        if (error && error.name === "CastError") {
+          return res.status(401).json({ status: "error", message: "Invalid token" });
+        }
+        console.error("[auth] could not check the session:", error && error.message);
+        return res.status(503).json({
+          status: "error",
+          code: "TEMPORARILY_UNAVAILABLE",
+          message: "The server is busy for a moment. Please try again.",
+        });
       }
     };
   }

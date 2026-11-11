@@ -31,6 +31,11 @@ const userNotificationSchema = new mongoose.Schema({
       "opportunity",
       "schedule_change",
       "moderation",
+      // Instagram-style activity (see services/activity.notify.js).
+      "new_follower",
+      "post_like",
+      "post_comment",
+      "mention",
     ],
     required: true,
   },
@@ -46,6 +51,10 @@ const userNotificationSchema = new mongoose.Schema({
   assignmentId: { type: String, default: null },
   examId: { type: String, default: null },
 
+  // For activity notifications: who did it, and which post it is about.
+  actorId: { type: String, default: null },
+  postId: { type: String, default: null },
+
   read: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
 });
@@ -53,5 +62,7 @@ const userNotificationSchema = new mongoose.Schema({
 // Every list query filters by recipientId first - this is the one
 // index that matters for this model's actual access pattern.
 userNotificationSchema.index({ recipientId: 1, createdAt: -1 });
+// Lets a repeated follow or like be recognised, so it notifies only once.
+userNotificationSchema.index({ recipientId: 1, type: 1, actorId: 1, postId: 1 });
 
 module.exports = mongoose.model("UserNotification", userNotificationSchema);

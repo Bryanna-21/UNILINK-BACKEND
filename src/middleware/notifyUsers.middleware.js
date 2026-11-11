@@ -17,25 +17,62 @@ const { sendToTokens } = require("../services/push.service");
 // Failures are swallowed, same rationale as notifyAdmins and
 // auditLog: a broken notification pipeline must never be the reason
 // a legitimate action fails for the user who triggered it.
-async function notifyUsers({ recipientIds, type, title, message, link, context = {} }) {
+//
+// Options beyond the basics:
+//   actorId, postId  who did it and which post it is about (follows, likes, comments, mentions)
+//   dedupe           notify once per (recipient, type, actor, post): a repeated follow or like
+//                    adds no new row and sends no new push
+//   inApp: false     push only, no row in the notification list (new messages: they show on the
+//                    Messages screen, not in the bell list)
+async function notifyUsers({
+  recipientIds,
+  type,
+  title,
+  message,
+  link,
+  context = {},
+  actorId = null,
+  postId = null,
+  dedupe = false,
+  inApp = true,
+}) {
   try {
     const ids = Array.isArray(recipientIds) ? recipientIds : [recipientIds];
-    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    let uniqueIds = [...new Set(ids.filter(Boolean))];
     if (uniqueIds.length === 0) return;
 
-    await UserNotification.insertMany(
-      uniqueIds.map((recipientId) => ({
-        recipientId,
-        type,
-        title,
-        message,
-        link,
-        courseId: context.courseId || null,
-        conversationId: context.conversationId || null,
-        assignmentId: context.assignmentId || null,
-        examId: context.examId || null,
-      }))
-    );
+    const row = (recipientId) => ({
+      recipientId,
+      type,
+      title,
+      message,
+      link,
+      courseId: context.courseId || null,
+      conversationId: context.conversationId || null,
+      assignmentId: context.assignmentId || null,
+      examId: context.examId || null,
+      actorId: actorId || null,
+      postId: postId || null,
+    });
+
+    if (inApp && dedupe) {
+      // Only the people this is genuinely new for get the push below.
+      const fresh = [];
+      for (const recipientId of uniqueIds) {
+        // The fields in the filter are inserted by the upsert itself; the rest go in $setOnInsert.
+        const { recipientId: _r, type: _t, actorId: _a, postId: _p, ...rest } = row(recipientId);
+        const result = await UserNotification.updateOne(
+          { recipientId, type, actorId: actorId || null, postId: postId || null },
+          { $setOnInsert: { ...rest, read: false, createdAt: new Date() } },
+          { upsert: true }
+        );
+        if (result && result.upsertedCount > 0) fresh.push(recipientId);
+      }
+      uniqueIds = fresh;
+      if (uniqueIds.length === 0) return;
+    } else if (inApp) {
+      await UserNotification.insertMany(uniqueIds.map(row));
+    }
 
     // Real OS-level push, in addition to the in-app UserNotification
     // rows above. The in-app record is the source of truth (what

@@ -504,6 +504,9 @@ exports.sendMessage = async (req, res) => {
       notifyUsers({
         recipientIds: recipientId,
         type: "new_message",
+        // Push only: a new message shows on the Messages screen (unread counts), not in the
+        // notification list.
+        inApp: false,
         title: "New message",
         message: text.trim().length > 80 ? text.trim().slice(0, 80) + "..." : text.trim(),
         link: `/messages/${req.params.conversationId}`,
