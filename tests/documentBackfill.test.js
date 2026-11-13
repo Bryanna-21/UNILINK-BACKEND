@@ -21,6 +21,10 @@ function makePosts(posts) {
       if (!media) return { modifiedCount: 0 };
       for (const [k, v] of Object.entries(update.$set || {})) media[k.replace("media.$.", "")] = structuredClone(v);
       for (const [k, v] of Object.entries(update.$inc || {})) media[k.replace("media.$.", "")] = (media[k.replace("media.$.", "")] || 0) + v;
+      for (const [k, v] of Object.entries(update.$push || {})) {
+        const field = k.replace("media.$.", "");
+        media[field] = [...(media[field] || []), ...structuredClone(v.$each)];
+      }
       return { modifiedCount: 1 };
     },
   };

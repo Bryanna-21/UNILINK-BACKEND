@@ -28,7 +28,10 @@ const FEATURE_LABELS = {
   communities: "Communities", uploads: "Uploading files", reporting: "Reporting",
 };
 
-function createModerationService({ models, notifier = null, now = () => new Date() }) {
+// canViewPost(viewerId, post): when given, a post can be reported by anyone who is allowed to SEE it, whatever
+// university it is from (posts can be for everyone or for chosen universities). Without it, the older rule
+// (same university) applies.
+function createModerationService({ models, notifier = null, now = () => new Date(), canViewPost = null }) {
   const {
     User, Post, Comment, Message, Conversation, Event, Note, PastPaper, DigitalResource,
     Community, CommunityMembership, Discussion, ContentReport, ModerationAction, Appeal,
@@ -66,6 +69,7 @@ function createModerationService({ models, notifier = null, now = () => new Date
   async function loadPost(id, reporter) {
     const post = await Post.findById(id).lean();
     if (!post) return null;
+    if (canViewPost) return (await canViewPost(reporter.id, post)) ? post : null;
     if (!sameUniversity(reporter, post.universityId)) return null;
     if (!(await canSeeCommunity(reporter, post.communityId))) return null;
     return post;

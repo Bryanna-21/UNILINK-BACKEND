@@ -28,14 +28,15 @@ function makeRepo({ users, follows = [], blocks = [], courses = [] }) {
       return list()
         .filter((u) => u.username && u.username.startsWith(args.prefix) && active(u))
         .filter((u) => !args.excludeIds.includes(String(u._id)))
-        .filter((u) => args.universityId === null || u.universityId === args.universityId)
+        // own university: everyone; other universities: students and lecturers only (when openRolesOnly)
+        .filter((u) => !args.openRolesOnly || u.universityId === args.universityId || ["student", "lecturer"].includes(u.role))
         .slice(0, args.limit);
     },
     async usersByIds(ids) { return list().filter((u) => ids.includes(String(u._id)) && active(u)); },
     async recentUsers({ universityId, excludeIds, limit }) {
       state.calls.recent = { universityId, excludeIds, limit };
       return list()
-        .filter((u) => active(u) && u.universityId === universityId && u.username && !excludeIds.includes(String(u._id)))
+        .filter((u) => active(u) && (universityId ? u.universityId === universityId : ["student", "lecturer"].includes(u.role)) && u.username && !excludeIds.includes(String(u._id)))
         .sort((a, b) => b.createdAt - a.createdAt)
         .slice(0, limit);
     },
@@ -100,22 +101,39 @@ test("search: fewer than 3 characters never reaches the database", async () => {
   assert.equal(repo.state.calls.search, undefined);
 });
 
-test("search: a student only sees their own university", async () => {
+test("search: a student finds people at every university, not just their own", async () => {
   const { core, repo } = make();
   const r = await core.search("u1", "ka");
   assert.equal(r.data.length, 0);
   const r2 = await core.search("u1", "kam");
   assert.deepEqual(r2.data.map((x) => x.username), ["kamal", "kamau", "kamau2"], "no exact match, so alphabetical");
   assert.equal(repo.state.calls.search.universityId, "uniA");
+  assert.equal(repo.state.calls.search.openRolesOnly, true);
   const kay = await core.search("u1", "kay");
-  assert.equal(kay.data.length, 0, "kaya is at another university and must be invisible");
+  assert.deepEqual(kay.data.map((x) => x.username), ["kaya"], "kaya studies at another university and is still found");
+});
+
+test("search: staff accounts of another university stay out of a student's results; a lecturer does not", async () => {
+  const { core } = make({
+    users: [
+      ...baseUsers(),
+      U("u21", "kstaffb", { universityId: "uniB", role: "admin" }),
+      U("u22", "klectb", { universityId: "uniB", role: "lecturer" }),
+      U("u23", "kstaffa", { universityId: "uniA", role: "admin" }),
+    ],
+  });
+  const names = (await core.search("u1", "k")).data.map((x) => x.username);
+  assert.equal(names.length, 0, "one letter never searches");
+  const staff = (await core.search("u1", "kst")).data.map((x) => x.username);
+  assert.deepEqual(staff, ["kstaffa"], "own university's admin is found, the other university's is not");
+  assert.deepEqual((await core.search("u1", "kle")).data.map((x) => x.username), ["klectb"]);
 });
 
 test("search: a superadmin searches across universities", async () => {
   const { core, repo } = make();
   const r = await core.search("u9", "kay");
   assert.deepEqual(r.data.map((x) => x.username), ["kaya"]);
-  assert.equal(repo.state.calls.search.universityId, null);
+  assert.equal(repo.state.calls.search.openRolesOnly, false);
 });
 
 test("search: deleted and suspended accounts are not returned", async () => {
@@ -163,9 +181,9 @@ test("search: rate limited per user, and other users are unaffected", async () =
   assert.equal((await core.search("u2", "kamau")).ok, true);
 });
 
-test("search: a user with no university sees nobody; an unknown viewer is refused", async () => {
+test("search: a user with no university still finds people; an unknown viewer is refused", async () => {
   const { core } = make({ users: [...baseUsers(), U("u20", "lonely", { universityId: undefined })] });
-  assert.deepEqual((await core.search("u20", "kam")).data, []);
+  assert.deepEqual((await core.search("u20", "kam")).data.map((x) => x.username), ["kamal", "kamau", "kamau2"]);
   const nobody = await core.search("ghost", "kam");
   assert.equal(nobody.status, 401);
 });
@@ -331,10 +349,10 @@ test("suggest: classmates outrank friends-of-friends; reasons say why", async ()
   assert.equal(r.data[2].reason, "Followed by someone you follow");
 });
 
-test("suggest: never suggests yourself, people you follow, blocked people, or other universities", async () => {
+test("suggest: never suggests yourself, people you follow, or blocked people", async () => {
   const { core } = make({
     users: crowd(),
-    courses: [{ enrolledStudentIds: ["u1", "u2", "u3", "u4", "u5", "u40"] }],
+    courses: [{ enrolledStudentIds: ["u1", "u2", "u3", "u4", "u5"] }],
     follows: [{ followerId: "u1", followingId: "u2" }],
     blocks: [{ blockerId: "u3", blockedId: "u1" }],
   }, { config: { paddingThreshold: 0 } });
@@ -342,8 +360,21 @@ test("suggest: never suggests yourself, people you follow, blocked people, or ot
   assert.ok(!names.includes("bryanna"));
   assert.ok(!names.includes("person2"), "already followed");
   assert.ok(!names.includes("person3"), "blocked you");
-  assert.ok(!names.includes("faraway"), "other university");
   assert.deepEqual(names, ["person4", "person5"]);
+});
+
+test("suggest: someone followed by people you follow is suggested even from another university; other staff are not", async () => {
+  const { core } = make({
+    users: [...crowd(), U("u41", "farstaff", { universityId: "uniB", role: "admin" })],
+    follows: [
+      { followerId: "u1", followingId: "u10" },
+      { followerId: "u10", followingId: "u40" },
+      { followerId: "u10", followingId: "u41" },
+    ],
+  }, { config: { paddingThreshold: 0 } });
+  const names = (await core.suggest("u1")).data.map((x) => x.username);
+  assert.ok(names.includes("faraway"), "a student at another university");
+  assert.ok(!names.includes("farstaff"), "another university's staff account");
 });
 
 test("suggest: a brand-new account is padded with the newest people at the same university, newest first", async () => {
@@ -370,8 +401,18 @@ test("suggest: padding never repeats someone already suggested, and is skipped o
   assert.deepEqual(ids.slice(0, 2).sort(), ["u2", "u3"]);
 });
 
-test("suggest: no university means no suggestions; unknown viewer is refused", async () => {
+test("suggest: a brand-new account at a tiny university is padded with people from anywhere", async () => {
+  const { core } = make({ users: [U("u1", "bryanna"), U("u2", "alone", { universityId: "uniB" }), U("u3", "alsofar", { universityId: "uniC" })] });
+  const r = await core.suggest("u1");
+  assert.deepEqual(r.data.map((x) => x.username).sort(), ["alone", "alsofar"]);
+  assert.ok(r.data.every((x) => x.reason === "New on UniLink"));
+});
+
+test("suggest: no university still gets suggestions from anywhere; unknown viewer is refused", async () => {
   const { core } = make({ users: [...crowd(), U("u50", "nouni", { universityId: undefined })] });
-  assert.deepEqual((await core.suggest("u50")).data, []);
+  const r = await core.suggest("u50");
+  assert.ok(r.data.length > 0);
+  assert.ok(r.data.every((x) => x.reason === "New on UniLink"));
+  assert.ok(!r.data.some((x) => x.username === "nouni"));
   assert.equal((await core.suggest("ghost")).status, 401);
 });

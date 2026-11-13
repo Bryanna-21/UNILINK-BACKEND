@@ -21,6 +21,9 @@ const ACTIVE = {
   isVerified: { $ne: false },
 };
 
+// Students and lecturers can be found and followed from any university; staff accounts only from their own.
+const OPEN_ROLES = ["student", "lecturer"];
+
 const s = (x) => String(x);
 const validId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -51,13 +54,16 @@ module.exports = {
     await User.updateOne({ _id: userId }, { $unset: { username: 1 } });
   },
 
-  async searchUsersByUsernamePrefix({ prefix, universityId, excludeIds, limit }) {
+  async searchUsersByUsernamePrefix({ prefix, universityId, openRolesOnly = false, excludeIds, limit }) {
     const query = {
       ...ACTIVE,
       username: { $regex: "^" + escapeRegex(prefix) },
       _id: { $nin: excludeIds.filter(validId) },
     };
-    if (universityId) query.universityId = universityId;
+    // Own university: everyone. Other universities: students and lecturers only.
+    if (openRolesOnly) {
+      query.$or = universityId ? [{ universityId }, { role: { $in: OPEN_ROLES } }] : [{ role: { $in: OPEN_ROLES } }];
+    }
     return User.find(query).select(PUBLIC).sort({ username: 1 }).limit(limit).lean();
   },
 
@@ -69,9 +75,11 @@ module.exports = {
 
   async recentUsers({ universityId, excludeIds, limit }) {
     if (limit <= 0) return [];
+    // A university: its newest people. No university (null): the newest students and lecturers anywhere.
+    const scope = universityId ? { universityId } : { role: { $in: OPEN_ROLES } };
     return User.find({
       ...ACTIVE,
-      universityId,
+      ...scope,
       username: { $type: "string" },
       _id: { $nin: excludeIds.filter(validId) },
     })

@@ -47,10 +47,12 @@ test("a deleted or missing viewer, or a missing post, is refused", () => {
   assert.equal(decidePostAccess({ viewer, post: null }).ok, false);
 });
 
-test("a person is visible inside the viewer's university only, never across a block", () => {
+test("a person is visible across universities, but never across a block", () => {
   const target = { id: "t", universityId: U1 };
   assert.equal(decideUserAccess({ viewer, target }).ok, true);
-  assert.equal(decideUserAccess({ viewer, target: { id: "t", universityId: U2 } }).reason, "other_university");
+  assert.equal(decideUserAccess({ viewer, target: { id: "t", universityId: U2 } }).ok, true, "following is universal");
+  assert.equal(decideUserAccess({ viewer: { ...viewer, universityId: null }, target }).ok, true);
+  assert.equal(decideUserAccess({ viewer, target: { id: "t", universityId: U2 }, scopeUniversity: true }).reason, "other_university", "the old rule is still available");
   assert.equal(decideUserAccess({ viewer, target, blocked: true }).reason, "blocked");
   assert.equal(decideUserAccess({ viewer, target: { id: "t", universityId: U2 }, scopeUniversity: false }).ok, true);
   assert.equal(decideUserAccess({ viewer, target: { id: "t", universityId: U2 }, scopeUniversity: false, blocked: true }).ok, false);
@@ -108,12 +110,81 @@ test("service: blockedIdsFor lists the other party in both directions", async ()
   assert.deepEqual(await w.svc.blockedIdsFor("boss"), []);
 });
 
-test("service: canViewUser applies the university and the block", async () => {
+test("service: canViewUser is universal and applies the block", async () => {
   const w = world();
   assert.equal(await w.svc.canViewUser("v1", "author"), true);
-  assert.equal(await w.svc.canViewUser("v1", "far"), false);
-  assert.equal(await w.svc.canViewUser("v1", "far", { scopeUniversity: false }), true);
+  assert.equal(await w.svc.canViewUser("v1", "far"), true);
+  assert.equal(await w.svc.canViewUser("v1", "far", { scopeUniversity: true }), false);
   await w.db.Block.create({ blockerId: "author", blockedId: "v1" });
   assert.equal(await w.svc.canViewUser("v1", "author"), false);
   assert.equal(await w.svc.canViewUser("v1", "v1"), true);
+});
+
+// ---------------------------------------------------------------- audiences
+test("audience: a post with no audience, or 'university', is for the author's university only", () => {
+  assert.equal(decidePostAccess({ viewer, post: post({ audience: "university" }) }).ok, true);
+  assert.equal(decidePostAccess({ viewer, post: post({ audience: "university", universityId: U2 }) }).reason, "other_university");
+});
+
+test("audience: everyone means any signed-in person, even with no university, but never across a block", () => {
+  const p = post({ audience: "everyone", universityId: U2 });
+  assert.equal(decidePostAccess({ viewer, post: p }).ok, true);
+  assert.equal(decidePostAccess({ viewer: { ...viewer, universityId: null }, post: p }).ok, true);
+  assert.equal(decidePostAccess({ viewer, post: p, blocked: true }).reason, "blocked");
+});
+
+test("audience: chosen universities", () => {
+  const p = post({ audience: "universities", audienceUniversityIds: [U1, "uni000000000000000000c3"], universityId: U2 });
+  assert.equal(decidePostAccess({ viewer, post: p }).ok, true);
+  assert.equal(decidePostAccess({ viewer: { ...viewer, universityId: "uni000000000000000000d4" }, post: p }).reason, "not_in_audience");
+  assert.equal(decidePostAccess({ viewer: { ...viewer, universityId: null }, post: p }).reason, "not_in_audience");
+});
+
+test("audience: followers need a follow, friends need a follow both ways, people need to be on the list", () => {
+  const followers = post({ audience: "followers", universityId: U2 });
+  assert.equal(decidePostAccess({ viewer, post: followers }).reason, "not_in_audience");
+  assert.equal(decidePostAccess({ viewer, post: followers, follows: { viewerFollowsAuthor: true } }).ok, true);
+  const friends = post({ audience: "friends", universityId: U2 });
+  assert.equal(decidePostAccess({ viewer, post: friends, follows: { viewerFollowsAuthor: true } }).ok, false);
+  assert.equal(decidePostAccess({ viewer, post: friends, follows: { authorFollowsViewer: true } }).ok, false);
+  assert.equal(decidePostAccess({ viewer, post: friends, follows: { viewerFollowsAuthor: true, authorFollowsViewer: true } }).ok, true);
+  const people = post({ audience: "people", audienceUserIds: ["v1", "x"], universityId: U2 });
+  assert.equal(decidePostAccess({ viewer, post: people }).ok, true);
+  assert.equal(decidePostAccess({ viewer: { ...viewer, id: "other" }, post: people }).ok, false);
+});
+
+test("audience: the author, and platform moderators, always see the post; a community post ignores the audience", () => {
+  const p = post({ audience: "people", audienceUserIds: ["x"], universityId: U2 });
+  assert.equal(decidePostAccess({ viewer: { ...viewer, id: "author" }, post: p }).ok, true);
+  assert.equal(decidePostAccess({ viewer: { id: "s", role: "superadmin" }, post: p }).ok, true);
+  assert.equal(decidePostAccess({ viewer, post: post({ audience: "everyone", communityId: "c1" }), communityAccess: false }).reason, "not_a_member");
+});
+
+test("audience: an unknown audience value is closed, never open", () => {
+  assert.equal(decidePostAccess({ viewer, post: post({ audience: "whoever" }) }).ok, false);
+});
+
+test("service: followers-only and friends-only posts read the follow records", async () => {
+  const w = world();
+  w.db.Follow = new Coll();
+  const svc = createPostAccess(w.db);
+  const followersPost = post({ audience: "followers", universityId: U2, userId: "far" });
+  assert.equal(await svc.canViewPost("v1", followersPost), false);
+  await w.db.Follow.create({ followerId: "v1", followingId: "far" });
+  assert.equal(await svc.canViewPost("v1", followersPost), true);
+  const friendsPost = post({ audience: "friends", universityId: U2, userId: "far" });
+  assert.equal(await svc.canViewPost("v1", friendsPost), false, "far does not follow back yet");
+  await w.db.Follow.create({ followerId: "far", followingId: "v1" });
+  assert.equal(await svc.canViewPost("v1", friendsPost), true);
+  assert.equal(await svc.canViewPost("author", friendsPost), false, "a stranger who follows nobody");
+});
+
+test("service: visibleFilter is false for a missing viewer and null for a platform moderator", async () => {
+  const w = world();
+  w.db.Follow = new Coll();
+  const svc = createPostAccess(w.db);
+  assert.equal(await svc.visibleFilter("ghost"), false);
+  assert.equal(await svc.visibleFilter("boss"), null);
+  const f = await svc.visibleFilter("v1");
+  assert.ok(Array.isArray(f.$or) && f.$or.length >= 7);
 });

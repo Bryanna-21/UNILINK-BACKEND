@@ -59,6 +59,7 @@ class Coll {
   findById(id) { const d = this.docs.find((x) => String(x._id) === String(id)); const q = this._chain(d ? [d] : []); return { select: () => ({ lean: async () => clone(d) || null }), lean: async () => clone(d) || null }; }
   findOne(filter) { const d = this.docs.find((x) => matches(x, filter)); return { select: () => ({ lean: async () => clone(d) || null }), lean: async () => clone(d) || null }; }
   find(filter) { return this._chain(this.docs.filter((x) => matches(x, filter))); }
+  async exists(filter) { const d = this.docs.find((x) => matches(x, filter)); return d ? { _id: d._id } : null; }
   async countDocuments(filter) { return this.docs.filter((x) => matches(x, filter)).length; }
   async create(doc) {
     for (const key of this.unique) {

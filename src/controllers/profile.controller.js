@@ -128,15 +128,14 @@ exports.getUserSummary = async (req, res) => {
     }
 
     const userId = String(user._id);
+    const visibleFilter = await postAccess.visibleFilter(req.user.id);
 
     const [postsCount, followersCount, followingCount] = await Promise.all([
       // Profile posts are the user's normal/main-feed posts.
       // Community posts remain membership-gated and are not exposed
       // through the public profile count.
-      Post.countDocuments({
-        userId,
-        communityId: null,
-      }),
+      // Only the posts this viewer may see: a post can be for followers, friends or chosen people only.
+      Post.countDocuments(visibleFilter ? { userId, communityId: null, $and: [visibleFilter] } : { userId, communityId: null }),
       Follow.countDocuments({ followingId: userId }),
       Follow.countDocuments({ followerId: userId }),
     ]);

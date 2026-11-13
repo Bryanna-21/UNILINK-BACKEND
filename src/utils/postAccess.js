@@ -9,29 +9,32 @@
 //   - someone blocked either way with the author cannot see the post, as if it did not exist
 //   - a community post is visible only to an active member of that community (the same rule the community
 //     feed uses). Communities can connect universities, so the post's own university is NOT used here.
-//   - any other post is visible only inside the viewer's own university
+//   - any other post follows the audience its author chose (utils/postAudience.js): everyone, their own
+//     university (the default, and what every older post is), chosen universities, followers, friends or
+//     chosen people
 //
 // Every refusal looks like "not found", never "forbidden", so nobody can probe which ids exist.
 
+const { audienceAllows } = require("./postAudience");
+
 const isPlatformModerator = (v) => v.role === "superadmin" || (v.role === "admin" && !v.universityId);
 
-function decidePostAccess({ viewer, post, communityAccess, blocked }) {
+// follows: { viewerFollowsAuthor, authorFollowsViewer }, only needed for followers / friends posts.
+function decidePostAccess({ viewer, post, communityAccess, blocked, follows }) {
   if (!viewer || viewer.deletedAt) return { ok: false, reason: "no_viewer" };
   if (!post) return { ok: false, reason: "no_post" };
   if (isPlatformModerator(viewer)) return { ok: true };
   if (String(post.userId) === String(viewer.id)) return { ok: true };
   if (blocked) return { ok: false, reason: "blocked" };
   if (post.communityId) return communityAccess ? { ok: true } : { ok: false, reason: "not_a_member" };
-  if (!viewer.universityId || !post.universityId || String(viewer.universityId) !== String(post.universityId)) {
-    return { ok: false, reason: "other_university" };
-  }
-  return { ok: true };
+  if (audienceAllows({ post, viewer, follows })) return { ok: true };
+  return { ok: false, reason: (post.audience || "university") === "university" ? "other_university" : "not_in_audience" };
 }
 
-// Whether `viewer` may look at `target`'s profile details. `scopeUniversity` is false for lookups that
-// are open to the whole platform by design (the name and photo lookup used by Messages); blocking
-// still applies to those.
-function decideUserAccess({ viewer, target, blocked, scopeUniversity = true }) {
+// Whether `viewer` may look at `target`'s profile details. People are visible across universities (following
+// is universal); blocking still applies. `scopeUniversity: true` keeps the old same-university-only rule for
+// any caller that still wants it.
+function decideUserAccess({ viewer, target, blocked, scopeUniversity = false }) {
   if (!viewer || viewer.deletedAt) return { ok: false, reason: "no_viewer" };
   if (!target || target.deletedAt) return { ok: false, reason: "no_user" };
   if (isPlatformModerator(viewer)) return { ok: true };

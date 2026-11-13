@@ -339,3 +339,14 @@ test("config exposes categories, entity types and the enforcement ladder to both
   assert.equal(c.standardsVersion, standards.version);
   assert.equal(c.appealWindowDays, 30);
 });
+
+// ---------------------------------------------------------------- reporting follows who can see the post
+test("when a post-visibility check is given, a post from another university can be reported by someone who may see it", async () => {
+  const { models } = world();
+  const seen = [];
+  const svc = createModerationService({ models, notifier: { reportFiled: async () => {} }, now: () => NOW, canViewPost: async (viewerId, post) => { seen.push([String(viewerId), String(post._id)]); return String(post._id) === String(oid(11)); } });
+  const r = await report(svc, { entityType: "post", entityId: oid(11), category: "spam" });
+  assert.equal(r.duplicate, false, "post 11 is from another university but is visible to the reporter");
+  assert.deepEqual(seen[0], [String(oid(1)), String(oid(11))]);
+  await fails(report(svc, { entityType: "post", entityId: oid(10), category: "spam" }), 404);
+});
