@@ -13,6 +13,7 @@ const Block = require("../src/models/Block");
 const HiddenPost = require("../src/models/HiddenPost");
 const Community = require("../src/models/Community");
 const CommunityMembership = require("../src/models/CommunityMembership");
+const communityController = require("../src/controllers/community.controller");
 const postController = require("../src/controllers/post.controller");
 const followController = require("../src/controllers/follow.controller");
 const profileController = require("../src/controllers/profile.controller");
@@ -20,7 +21,7 @@ const profileController = require("../src/controllers/profile.controller");
 const hex = (n) => String(n).padStart(24, "0");
 const U1 = hex(101), U2 = hex(102);
 const ME = hex(1), AUTHOR = hex(2), FAR = hex(3), BLOCKED = hex(4);
-const P_OWN = hex(11), P_FAR = hex(12), P_CLUB = hex(13);
+const P_OWN = hex(11), P_FAR = hex(12), P_CLUB = hex(13), P_EVERYONE = hex(14), P_FOLLOWERS = hex(15), P_PEOPLE = hex(16);
 const CLUB = hex(21);
 
 const chain = (v) => {
@@ -29,7 +30,7 @@ const chain = (v) => {
 };
 const match = (doc, f) => Object.entries(f).every(([k, c]) => (c && typeof c === "object" && "$in" in c ? c.$in.map(String).includes(String(doc[k])) : String(doc[k]) === String(c)));
 
-function setup({ blocks = [] } = {}) {
+function setup({ blocks = [], follows = [] } = {}) {
   const saved = {};
   const patch = (obj, name, fn) => { saved[obj.modelName + "." + name] = [obj, name, obj[name]]; obj[name] = fn; };
   const users = [
@@ -42,6 +43,9 @@ function setup({ blocks = [] } = {}) {
     { _id: P_OWN, userId: AUTHOR, universityId: U1, communityId: null, content: "hi", media: [] },
     { _id: P_FAR, userId: FAR, universityId: U2, communityId: null, content: "other uni", media: [] },
     { _id: P_CLUB, userId: AUTHOR, universityId: U1, communityId: CLUB, content: "club", media: [] },
+    { _id: P_EVERYONE, userId: FAR, universityId: U2, communityId: null, audience: "everyone", content: "for everyone", media: [] },
+    { _id: P_FOLLOWERS, userId: FAR, universityId: U2, communityId: null, audience: "followers", content: "followers only", media: [] },
+    { _id: P_PEOPLE, userId: FAR, universityId: U2, communityId: null, audience: "people", audienceUserIds: [ME], content: "picked people", media: [] },
   ];
   const comments = [
     { _id: hex(31), postId: P_OWN, userId: AUTHOR, content: "from author" },
@@ -59,6 +63,7 @@ function setup({ blocks = [] } = {}) {
   patch(Comment, "create", async () => { calls.commentCreated++; return { _id: hex(99) }; });
   patch(HiddenPost, "find", () => chain([]));
   patch(Follow, "countDocuments", () => chain(0));
+  patch(Follow, "exists", async (f) => (follows.some((x) => x.followerId === f.followerId && x.followingId === f.followingId) ? { _id: "f" } : null));
   patch(Like, "findOne", () => chain(null));
   patch(Like, "find", () => chain([]));
   patch(Like, "create", async () => { calls.likeCreated++; return {}; });
@@ -151,10 +156,11 @@ test("feed: blocked authors are excluded from the query", async () => {
   } finally { w.restore(); }
 });
 
-test("follower lists: another university gives 404; blocked people are filtered out", async () => {
+test("follower lists: people at another university can be opened; blocked people are filtered out", async () => {
   const w = setup({ blocks: [{ blockerId: ME, blockedId: BLOCKED }] });
   try {
-    assert.equal((await call(followController.getFollowers, { params: { userId: FAR } })).status, 404);
+    assert.equal((await call(followController.getFollowers, { params: { userId: FAR } })).status, 200);
+    assert.equal((await call(followController.getFollowers, { params: { userId: BLOCKED } })).status, 404);
     const r = await call(followController.getFollowers, { params: { userId: AUTHOR } });
     assert.equal(r.status, 200);
     assert.equal(r.body.data.some((u) => String(u._id) === BLOCKED), false);
@@ -175,5 +181,86 @@ test("a platform admin still sees everything (moderation must not be blocked)", 
     w.users.push({ _id: hex(7), role: "superadmin", name: "Boss" });
     const r = await call(postController.getComments, { params: { id: P_FAR }, as: hex(7), role: "superadmin", universityId: null });
     assert.equal(r.status, 200);
+  } finally { w.restore(); }
+});
+
+test("audience: a post meant for everyone, or for me by name, opens across universities; a followers-only one needs a follow", async () => {
+  const w = setup();
+  try {
+    assert.equal((await call(postController.getPostById, { params: { id: P_EVERYONE } })).status, 200);
+    assert.equal((await call(postController.getPostById, { params: { id: P_PEOPLE } })).status, 200);
+    assert.equal((await call(postController.getPostById, { params: { id: P_FOLLOWERS } })).status, 404);
+    assert.equal((await call(postController.likePost, { params: { id: P_FOLLOWERS } })).status, 404);
+    assert.equal(w.calls.likeCreated, 0);
+  } finally { w.restore(); }
+  const w2 = setup({ follows: [{ followerId: ME, followingId: FAR }] });
+  try {
+    assert.equal((await call(postController.getPostById, { params: { id: P_FOLLOWERS } })).status, 200);
+  } finally { w2.restore(); }
+});
+
+test("feed: the query is the audience filter, not 'my university'", async () => {
+  const w = setup();
+  try {
+    await call(postController.getFeed, { query: {} });
+    const used = w.calls.postFind.find((f) => f && f.communityId === null);
+    assert.ok(used, "the feed queried posts");
+    assert.equal(used.universityId, undefined, "no longer limited to one university");
+    assert.ok(Array.isArray(used.$and) && Array.isArray(used.$and[0].$or), "the audience filter is applied");
+    assert.ok(used.$and[0].$or.some((b) => b.audience === "everyone"));
+  } finally { w.restore(); }
+});
+
+test("feed: a platform moderator is not restricted", async () => {
+  const w = setup();
+  try {
+    w.users.push({ _id: hex(7), role: "superadmin", name: "Boss" });
+    await call(postController.getFeed, { query: {}, as: hex(7), role: "superadmin", universityId: null });
+    const used = w.calls.postFind.find((f) => f && f.communityId === null);
+    assert.equal(used.$and, undefined);
+  } finally { w.restore(); }
+});
+
+test("a profile's posts are limited to the audience the viewer belongs to", async () => {
+  const w = setup();
+  try {
+    const r = await call(postController.getPostsByUser, { params: { userId: FAR } });
+    assert.equal(r.status, 200, "another university's profile can be opened");
+    const used = w.calls.postFind.find((f) => f && f.userId === FAR);
+    assert.ok(used && Array.isArray(used.$and), "and only the posts meant for this viewer are listed");
+  } finally { w.restore(); }
+});
+
+test("reshare: a followers-only or hand-picked post cannot be reshared, and a post I cannot see is not found", async () => {
+  const w = setup({ follows: [{ followerId: ME, followingId: FAR }] });
+  try {
+    const picked = await call(postController.resharePost, { params: { id: P_PEOPLE } });
+    assert.equal(picked.status, 403);
+    const followersOnly = await call(postController.resharePost, { params: { id: P_FOLLOWERS } });
+    assert.equal(followersOnly.status, 403);
+  } finally { w.restore(); }
+  const w2 = setup();
+  try {
+    assert.equal((await call(postController.resharePost, { params: { id: P_FOLLOWERS } })).status, 404);
+  } finally { w2.restore(); }
+});
+
+test("creating a post: a bad audience is refused before anything is uploaded", async () => {
+  const w = setup();
+  try {
+    for (const body of [{ content: "hi", audience: "the-moon" }, { content: "hi", audience: "universities" }, { content: "hi", audience: "people", audienceUserIds: "[]" }]) {
+      const r = await call(postController.createPost, { body });
+      assert.equal(r.status, 400);
+    }
+  } finally { w.restore(); }
+});
+
+test("the older comment routes obey the post's audience too", async () => {
+  const w = setup();
+  try {
+    assert.equal((await call(communityController.getCommentsForPost, { params: { postId: P_EVERYONE } })).status, 200);
+    assert.equal((await call(communityController.getCommentsForPost, { params: { postId: P_FOLLOWERS } })).status, 404);
+    assert.equal((await call(communityController.addComment, { params: { postId: P_FOLLOWERS }, body: { content: "hi" } })).status, 404);
+    assert.equal(w.calls.commentCreated, 0);
   } finally { w.restore(); }
 });

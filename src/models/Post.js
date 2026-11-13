@@ -25,6 +25,16 @@ const postSchema = new mongoose.Schema({
     index: true,
   },
 
+  // Who the post is for (utils/postAudience.js): everyone, university, universities, followers, friends,
+  // people. Posts made before this existed have no value and are read as "university".
+  audience: {
+    type: String,
+    enum: ["everyone", "university", "universities", "followers", "friends", "people"],
+    default: "university",
+  },
+  audienceUniversityIds: { type: [String], default: [] },
+  audienceUserIds: { type: [String], default: [] },
+
   // When present, this post is a reshare of another post.
   // The original post remains the source of truth; the reshare
   // belongs to the user who reshared it.
@@ -83,6 +93,14 @@ const postSchema = new mongoose.Schema({
       },
 
       pageCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+      },
+
+      // How many pages the document really has. pageCount is how many were drawn (long documents are
+      // capped), so "Showing the first 100 of 340 pages" can be said honestly.
+      totalPages: {
         type: Number,
         default: 0,
         min: 0,

@@ -7,6 +7,8 @@
 // Dependencies are injected so the logic is unit-tested without a database, Cloudinary or LibreOffice
 // (tests/documentBackfill.test.js). services/documentBackfill.instance.js wires the real ones.
 
+const { renderAndStorePages } = require("./documentPages");
+
 const PDF = "application/pdf";
 const DOC = "application/msword";
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -36,12 +38,15 @@ function inferMimeType({ mimeType, originalName, url, buffer, isSupported }) {
 function needsRender(media, post, { now, maxAttempts, stuckMinutes }) {
   if (!media || media.type !== "document") return false;
   if ((media.renderAttempts || 0) >= maxAttempts) return false;
-  if (media.pageCount > 0 && (media.pages || []).length > 0) return false;
   if (media.processingStatus === "pending") {
-    // A render that was started and never finished (the server restarted mid-way).
+    // A render that was started and never finished (the server restarted mid-way). Some of its pages
+    // may already be saved; it still counts as unfinished.
     return new Date(post.createdAt).getTime() < new Date(now).getTime() - stuckMinutes * 60000;
   }
-  return true;
+  // A render that failed is drawn again (it may have stopped part-way; the new attempt starts fresh).
+  if (media.processingStatus === "failed") return true;
+  // Finished documents are left alone; old ones with no page images are drawn.
+  return !(media.pageCount > 0 && (media.pages || []).length > 0);
 }
 
 function createDocumentBackfill({
@@ -74,7 +79,8 @@ function createDocumentBackfill({
     const open = { $not: { $gte: maxAttempts } };
     return {
       $or: [
-        { media: { $elemMatch: { type: "document", processingStatus: { $in: ["ready", "failed"] }, pageCount: { $in: [0, null] }, renderAttempts: open } } },
+        { media: { $elemMatch: { type: "document", processingStatus: "ready", pageCount: { $in: [0, null] }, renderAttempts: open } } },
+        { media: { $elemMatch: { type: "document", processingStatus: "failed", renderAttempts: open } } },
         {
           createdAt: { $lt: new Date(new Date(t).getTime() - stuckMinutes * 60000) },
           media: { $elemMatch: { type: "document", processingStatus: "pending", renderAttempts: open } },
@@ -86,25 +92,23 @@ function createDocumentBackfill({
   async function processOne(post, media) {
     const key = { _id: post._id, "media.publicId": media.publicId };
     await Post.updateOne(key, { $set: { "media.$.processingStatus": "pending" }, $inc: { "media.$.renderAttempts": 1 } });
+    let buffer;
+    let mimeType;
     try {
-      const buffer = await download(media);
-      const mimeType = inferMimeType({ mimeType: media.mimeType, originalName: media.originalName, url: media.url, buffer, isSupported });
+      buffer = await download(media);
+      mimeType = inferMimeType({ mimeType: media.mimeType, originalName: media.originalName, url: media.url, buffer, isSupported });
       if (!mimeType || !isSupported(mimeType)) throw new Error("not a supported document type");
-      const rendered = await render(buffer, mimeType, media.originalName || "document");
-      const pages = [];
-      for (const p of rendered.pages) {
-        // The same folder naming createPost uses, so old and new documents are stored alike.
-        const key = String(media.publicId).replace(/[^a-zA-Z0-9_-]/g, "_");
-        const up = await uploadPage(p.buffer, `unilink/posts/document-pages/${key}`);
-        pages.push({ page: p.page, url: up.secure_url || up.url, publicId: up.public_id });
-      }
-      await Post.updateOne(key, { $set: { "media.$.pageCount": rendered.pageCount, "media.$.pages": pages, "media.$.processingStatus": "ready", "media.$.mimeType": mimeType } });
-      return "rendered";
     } catch (err) {
       log.error(`[documents] could not render ${media.publicId}: ${err && err.message}`);
       await Post.updateOne(key, { $set: { "media.$.processingStatus": "failed" } });
       return "failed";
     }
+    // The same folder naming createPost uses, so old and new documents are stored alike.
+    const outcome = await renderAndStorePages({
+      Post, postId: post._id, publicId: media.publicId, buffer, mimeType, originalName: media.originalName,
+      render, uploadPage, extraSet: { "media.$.mimeType": mimeType }, log,
+    });
+    return outcome.status === "ready" ? "rendered" : "failed";
   }
 
   // One batch. Documents are handled one at a time: LibreOffice is heavy for a small server.

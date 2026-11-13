@@ -14,7 +14,8 @@ const {
 const {
   renderDocumentBuffer,
 } = require("../utils/documentRenderer");
-const { mapWithLimit } = require("../utils/mapWithLimit");
+const { normalizeAudience, isReshareable } = require("../utils/postAudience");
+const { renderAndStorePages } = require("../services/documentPages");
 
 function getUserId(req) {
   return req.user?.id || req.user?._id || req.user?.userId;
@@ -118,6 +119,13 @@ exports.createPost = async (req, res) => {
       });
     }
 
+    // Who the post is for. Checked before anything is uploaded, so a bad choice wastes nothing.
+    const chosenAudience = normalizeAudience(req.body);
+    if (!chosenAudience.ok) {
+      return res.status(400).json({ status: "error", message: chosenAudience.message });
+    }
+    const audienceFields = chosenAudience.value;
+
     const requester = await User.findById(userId).select("universityId");
 
     let media = [];
@@ -160,6 +168,7 @@ exports.createPost = async (req, res) => {
           title,
           content,
           media,
+          ...audienceFields,
         });
 
         activity.notifyPostMentions({ actorId: userId, post }); // not awaited
@@ -170,72 +179,21 @@ exports.createPost = async (req, res) => {
          * to this callback without another upload/download round trip.
          */
         setImmediate(async () => {
-          try {
-            const rendered = await renderDocumentBuffer(
-              file.buffer,
-              file.mimetype,
-              file.originalname
-            );
-
-            const documentKey = result.public_id.replace(
-              /[^a-zA-Z0-9_-]/g,
-              "_"
-            );
-
-            // A few at a time: a long document must not start dozens of uploads at once.
-            const pageUploads = await mapWithLimit(
-              rendered.pages,
-              4,
-              async (page) => {
-                const pageResult = await uploadBufferToCloudinary(
-                  page.buffer,
-                  `unilink/posts/document-pages/${documentKey}`,
-                  "image"
-                );
-
-                return {
-                  page: page.page,
-                  url: pageResult.secure_url,
-                  publicId: pageResult.public_id,
-                };
-              }
-            );
-
-            await Post.updateOne(
-              {
-                _id: post._id,
-                "media.publicId": result.public_id,
-              },
-              {
-                $set: {
-                  "media.$.pageCount": rendered.pageCount,
-                  "media.$.pages": pageUploads,
-                  "media.$.processingStatus": "ready",
-                },
-              }
-            );
-
-            console.log(
-              `Document processing completed for post ${post._id}: ${rendered.pageCount} pages`
-            );
-          } catch (processingError) {
-            console.error(
-              `Document processing failed for post ${post._id}:`,
-              processingError.message
-            );
-
-            await Post.updateOne(
-              {
-                _id: post._id,
-                "media.publicId": result.public_id,
-              },
-              {
-                $set: {
-                  "media.$.processingStatus": "failed",
-                },
-              }
-            );
-          }
+          // Pages are rendered and saved a few at a time, so page 1 is on screen within seconds even
+          // for a long document. A failure keeps whatever pages were already saved.
+          const outcome = await renderAndStorePages({
+            Post,
+            postId: post._id,
+            publicId: result.public_id,
+            buffer: file.buffer,
+            mimeType: file.mimetype,
+            originalName: file.originalname,
+            render: renderDocumentBuffer,
+            uploadPage: (buffer, folder) => uploadBufferToCloudinary(buffer, folder, "image"),
+          });
+          console.log(
+            `Document processing ${outcome.status} for post ${post._id}: ${outcome.pageCount} pages`
+          );
         });
 
         return res.status(201).json({
@@ -304,6 +262,7 @@ exports.createPost = async (req, res) => {
       title,
       content,
       media,
+      ...audienceFields,
     });
 
     activity.notifyPostMentions({ actorId: userId, post }); // not awaited
@@ -327,11 +286,14 @@ exports.getFeed = async (req, res) => {
   try {
     const userId = getUserId(req);
 
-    // Scoped to the requester's own university — previously this
-    // returned every post globally, with no isolation at all, same
-    // class of bug already found and fixed in Club/Announcement.
-    const requester = await User.findById(userId).select("universityId role");
-    const feedFilter = requester?.role === "superadmin" ? {} : { universityId: requester?.universityId };
+    // Each post is for the audience its author chose (everyone, their university, chosen universities,
+    // followers, friends or chosen people), so the feed is "what this person may see", not "their
+    // university's posts". A platform moderator sees everything, as before.
+    const visible = await postAccess.visibleFilter(userId);
+    if (visible === false) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    const feedFilter = visible ? { $and: [visible] } : {};
 
     // Members-only community posts have their own membership-gated endpoint
     // (community_v2). Without this filter they were listed on everyone's main feed.
@@ -343,8 +305,8 @@ exports.getFeed = async (req, res) => {
     const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 50) : "";
     if (q.length >= 2) {
       const rx = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      // Anyone can be found by name; the audience filter above still decides which of their posts show.
       const authorFilter = { name: rx, deletedAt: null };
-      if (requester?.role !== "superadmin") authorFilter.universityId = requester?.universityId;
       const authors = await User.find(authorFilter).select("_id").limit(100).lean();
       feedFilter.$or = [
         { content: rx },
@@ -418,26 +380,25 @@ exports.getPostsByUser = async (req, res) => {
       return res.status(400).json({ status: "error", message: "Invalid user id" });
     }
 
-    const [requester, target] = await Promise.all([
-      User.findById(requesterId).select("universityId role"),
-      User.findById(userId).select("universityId deletedAt"),
-    ]);
+    const target = await User.findById(userId).select("deletedAt");
     if (!target || target.deletedAt) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
-    if (requester?.role !== "superadmin" && String(target.universityId) !== String(requester?.universityId)) {
-      return res.status(404).json({ status: "error", message: "User not found" });
-    }
 
+    // People can be opened across universities (following is universal); blocking still hides them.
     if (!(await postAccess.canViewUser(requesterId, userId))) {
       return res.status(404).json({ status: "error", message: "User not found" });
     }
 
-    const posts = await Post.find({
-      userId: String(userId),
-      communityId: null,
-      reshareOf: null,
-    })
+    // Only the posts this viewer is in the audience of.
+    const visible = await postAccess.visibleFilter(requesterId);
+    if (visible === false) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+    const query = { userId: String(userId), communityId: null, reshareOf: null };
+    if (visible) query.$and = [visible];
+
+    const posts = await Post.find(query)
       .sort({ createdAt: -1 })
       .limit(50)
       .lean();
@@ -824,9 +785,9 @@ exports.getLikedPosts = async (req, res) => {
       communityId: null,
     };
 
-    if (getUserRole(req) !== "superadmin") {
-      filter.universityId = requester.universityId;
-    }
+    // Only posts this person may (still) see: an author can change who a post is for later.
+    const visibleToMe = await postAccess.visibleFilter(getUserId(req));
+    if (visibleToMe) filter.$and = [visibleToMe];
 
     const blockedLiked = await postAccess.blockedIdsFor(getUserId(req));
     if (blockedLiked.length > 0) {
@@ -920,13 +881,16 @@ exports.resharePost = async (req, res) => {
       return res.status(404).json({ status: "error", message: "Post not found" });
     }
 
-    if (
-      getUserRole(req) !== "superadmin" &&
-      String(original.universityId) !== String(requester.universityId)
-    ) {
+    // The viewer must be in the post's audience, and only posts meant for a wide audience (everyone, or the
+    // author's university) can be reshared: a reshare shows the post on another profile, so resharing a
+    // followers-only or hand-picked post would hand it to people the author never chose.
+    if (!(await postAccess.canViewPost(userId, original))) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+    if (!isReshareable(original)) {
       return res.status(403).json({
-        status: "403",
-        message: "You cannot reshare this post",
+        status: "error",
+        message: "The author limited who can see this post, so it cannot be reshared.",
       });
     }
 
@@ -1058,9 +1022,8 @@ exports.getResharesByUser = async (req, res) => {
       originalFilter.userId = { $nin: blockedOriginals };
     }
 
-    if (getUserRole(req) !== "superadmin") {
-      originalFilter.universityId = requester.universityId;
-    }
+    const visibleOriginals = await postAccess.visibleFilter(getUserId(req));
+    if (visibleOriginals) originalFilter.$and = [visibleOriginals];
 
     const originals = await Post.find(originalFilter).lean();
     const originalsWithAuthors = await attachAuthorNames(originals);
@@ -1167,7 +1130,7 @@ exports.hidePost = async (req, res) => {
       User.findById(userId)
         .select("universityId role deletedAt")
         .lean(),
-      Post.findById(id).select("_id universityId communityId").lean(),
+      Post.findById(id).select("_id userId universityId communityId audience audienceUniversityIds audienceUserIds").lean(),
     ]);
 
     if (!requester || requester.deletedAt) {
@@ -1191,10 +1154,7 @@ exports.hidePost = async (req, res) => {
       });
     }
 
-    if (
-      getUserRole(req) !== "superadmin" &&
-      String(post.universityId) !== String(requester.universityId)
-    ) {
+    if (!(await postAccess.canViewPost(userId, post))) {
       return res.status(403).json({
         status: "error",
         message: "You cannot hide this post",
@@ -1331,9 +1291,9 @@ exports.getHiddenPosts = async (req, res) => {
       communityId: null,
     };
 
-    if (getUserRole(req) !== "superadmin") {
-      filter.universityId = requester.universityId;
-    }
+    // Only posts this person may (still) see: an author can change who a post is for later.
+    const visibleToMe = await postAccess.visibleFilter(getUserId(req));
+    if (visibleToMe) filter.$and = [visibleToMe];
 
     const blockedLiked = await postAccess.blockedIdsFor(getUserId(req));
     if (blockedLiked.length > 0) {

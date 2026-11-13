@@ -6,6 +6,11 @@
 
 const rules = require("../utils/username.rules");
 
+// People are found and followed across universities. Staff accounts (admins, superadmins) are only
+// found by people at their own university, so students and lecturers are the open roles.
+const OPEN_ROLES = ["student", "lecturer"];
+const isOpenTo = (me, u) => !!me.universityId && String(u.universityId) === String(me.universityId) || OPEN_ROLES.includes(u.role);
+
 const ok = (data) => ({ ok: true, data });
 const fail = (status, message) => ({ ok: false, status, message });
 
@@ -75,12 +80,14 @@ function createPeopleCore({ repo, now = () => new Date(), random = Math.random, 
     const me = await viewerOrNull(viewerId);
     if (!me) return fail(401, "Account not available.");
     const isSuper = me.role === "superadmin";
-    if (!isSuper && !me.universityId) return ok([]);
 
     const blocked = await repo.blockedIdsFor(me._id);
+    // Everyone is searchable across universities. `openRolesOnly` keeps staff accounts of other
+    // universities out of the results; a superadmin sees all.
     const found = await repo.searchUsersByUsernamePrefix({
       prefix: term.value,
-      universityId: isSuper ? null : String(me.universityId),
+      universityId: me.universityId ? String(me.universityId) : null,
+      openRolesOnly: !isSuper,
       excludeIds: [String(me._id), ...blocked.map(String)],
       limit: cfg.searchLimit,
     });
@@ -99,7 +106,6 @@ function createPeopleCore({ repo, now = () => new Date(), random = Math.random, 
   async function suggest(viewerId) {
     const me = await viewerOrNull(viewerId);
     if (!me) return fail(401, "Account not available.");
-    if (!me.universityId) return ok([]);
 
     const myId = String(me._id);
     const [blocked, following] = await Promise.all([
@@ -146,7 +152,7 @@ function createPeopleCore({ repo, now = () => new Date(), random = Math.random, 
     const out = [];
     for (const id of ranked) {
       const u = byId.get(id);
-      if (!u || String(u.universityId) !== String(me.universityId)) continue;
+      if (!u || !isOpenTo(me, u)) continue;
       const s = scores.get(id);
       const reason = s.course
         ? "In your course"
@@ -157,16 +163,29 @@ function createPeopleCore({ repo, now = () => new Date(), random = Math.random, 
       if (out.length >= cfg.suggestionLimit) break;
     }
 
-    // A brand-new account has no courses and no follows. Rather than an empty screen,
-    // pad with the newest people at the same university.
+    // A brand-new account has no courses and no follows. Rather than an empty screen, pad with the
+    // newest people at the same university, then the newest people anywhere on UniLink.
     if (out.length < cfg.paddingThreshold) {
       const taken = new Set([...excluded, ...out.map((o) => o._id)]);
-      const recent = await repo.recentUsers({
-        universityId: String(me.universityId),
-        excludeIds: [...taken],
-        limit: cfg.suggestionLimit - out.length,
-      });
-      for (const u of recent) out.push({ ...shape(u), reason: "New at your university" });
+      if (me.universityId) {
+        const recent = await repo.recentUsers({
+          universityId: String(me.universityId),
+          excludeIds: [...taken],
+          limit: cfg.suggestionLimit - out.length,
+        });
+        for (const u of recent) {
+          out.push({ ...shape(u), reason: "New at your university" });
+          taken.add(String(u._id));
+        }
+      }
+      if (out.length < cfg.paddingThreshold) {
+        const anywhere = await repo.recentUsers({
+          universityId: null,
+          excludeIds: [...taken],
+          limit: cfg.suggestionLimit - out.length,
+        });
+        for (const u of anywhere) out.push({ ...shape(u), reason: "New on UniLink" });
+      }
     }
     return ok(out);
   }

@@ -8,15 +8,29 @@ const StudyGroup = require("../models/StudyGroup");
 const Poll = require("../models/Poll");
 const Announcement = require("../models/Announcement");
 const Post = require("../models/Post");
+const postAccess = require("../services/postAccess.service");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 const isStaff = (role) => role === "lecturer" || role === "admin";
 
 // ---------- Comments (on Posts) ----------
 
+const POST_ACCESS_FIELDS = "userId universityId communityId audience audienceUniversityIds audienceUserIds";
+
 exports.getCommentsForPost = async (req, res) => {
   try {
-    const comments = await Comment.find({ postId: req.params.postId }).sort({ createdAt: 1 });
+    if (!isValidId(req.params.postId)) {
+      return res.status(400).json({ status: "error", message: "Invalid post id" });
+    }
+    // Only people who may see the post may read its comments.
+    const viewerId = req.user?.id || req.user?._id;
+    const target = await Post.findById(req.params.postId).select(POST_ACCESS_FIELDS).lean();
+    if (!target || !(await postAccess.canViewPost(viewerId, target))) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+    const hidden = new Set((await postAccess.blockedIdsFor(viewerId)).map(String));
+    const all = await Comment.find({ postId: req.params.postId }).sort({ createdAt: 1 });
+    const comments = all.filter((c) => !hidden.has(String(c.userId)));
     res.status(200).json({ status: "success", count: comments.length, data: comments });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching comments: " + error.message });
@@ -30,6 +44,10 @@ exports.addComment = async (req, res) => {
     }
     const post = await Post.findById(req.params.postId);
     if (!post) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+    // Only people who may see the post may comment on it.
+    if (!(await postAccess.canViewPost(req.user.id, post))) {
       return res.status(404).json({ status: "error", message: "Post not found" });
     }
     const { content } = req.body;

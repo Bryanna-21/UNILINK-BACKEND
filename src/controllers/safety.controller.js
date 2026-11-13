@@ -21,6 +21,8 @@ const service = createModerationService({
     Appeal: require("../models/Appeal"),
   },
   notifier,
+  // A post can be reported by anyone who may see it, from any university.
+  canViewPost: (viewerId, post) => require("../services/postAccess.service").canViewPost(viewerId, post),
 });
 
 // Known problems become clear messages; anything unexpected becomes a generic 500. The
