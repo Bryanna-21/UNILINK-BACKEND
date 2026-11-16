@@ -34,7 +34,22 @@ const schoolTimetableAdminRoutes = require("./routes/schoolTimetableAdmin.routes
 const scheduleRoutes = require("./routes/schedule.routes");
 const communityV2Routes = require("./routes/community_v2.routes");
 
+const { securityHeaders, scrubServerErrors } = require("./middleware/security.middleware");
+const { rejectOperatorKeys } = require("./middleware/sanitize.middleware");
+
 const app = express();
+
+// The server runs behind a proxy (Render). Trusting the right number of hops makes req.ip the real caller, which
+// the rate limits depend on; without it every caller would share the proxy's address.
+// TRUST_PROXY_HOPS is how many proxies sit in front (Render: 1). If real callers all appear to share one address,
+// raise it; the address-only limits are loose enough that a wrong value cannot lock the app up.
+const proxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS, 10);
+app.set("trust proxy", Number.isInteger(proxyHops) && proxyHops >= 0 ? proxyHops : 1);
+app.disable("x-powered-by");
+
+// Headers on every response, and server errors never leak their internal message (the real one is logged).
+app.use(securityHeaders);
+app.use(scrubServerErrors);
 
 // ============================================================
 // CORS
@@ -80,6 +95,10 @@ app.use(
     limit: "1mb",
   })
 );
+
+// A key such as "$ne" in the body or query is an attack on the database, never a real request: refuse it here,
+// before any route sees it.
+app.use(rejectOperatorKeys);
 
 // ============================================================
 // REQUEST LOGGING
