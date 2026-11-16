@@ -105,6 +105,8 @@ const userSchema = new mongoose.Schema({
   // only covers string values) never collides on null.
   username: { type: String },
   usernameChangedAt: { type: Date, default: null },
+  // True for the labelled UniLink starter accounts made by scripts/seedPosts.js (and removed by it).
+  isSeed: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now }
 });
 // Unique across all accounts, but only for accounts that actually have a username.

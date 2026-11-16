@@ -4,7 +4,7 @@ const { cleanMessageText, clampLimit } = require("../utils/staffChat.rules");
 
 async function shape(messages, requesterId) {
   const ids = [...new Set(messages.map((m) => m.senderId))];
-  const users = await User.find({ _id: { $in: ids.filter((id) => /^[a-f0-9]{24}$/i.test(id)) } }).select("name role");
+  const users = await User.find({ _id: { $in: ids.filter((id) => /^[a-f0-9]{24}$/i.test(id)) } }).select("name role avatarUrl");
   const byId = new Map(users.map((u) => [String(u._id), u]));
   return messages.map((m) => {
     const u = byId.get(String(m.senderId));
@@ -12,7 +12,7 @@ async function shape(messages, requesterId) {
       id: String(m._id),
       text: m.text,
       createdAt: m.createdAt,
-      sender: { id: String(m.senderId), name: u?.name || "Former admin", role: u?.role || "admin" },
+      sender: { id: String(m.senderId), name: u?.name || "Former admin", role: u?.role || "admin", avatarUrl: u?.avatarUrl || null },
       mine: String(m.senderId) === String(requesterId),
     };
   });
