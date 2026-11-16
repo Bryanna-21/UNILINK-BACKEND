@@ -15,6 +15,9 @@ const {
   renderDocumentBuffer,
 } = require("../utils/documentRenderer");
 const { normalizeAudience, isReshareable } = require("../utils/postAudience");
+const { encodeCursor, decodeCursor, parseLimit, olderThan } = require("../utils/feedCursor");
+const { removePostLeftovers, trimResharesForAudience } = require("../services/postCleanup");
+const UserNotification = require("../models/UserNotification");
 const { renderAndStorePages } = require("../services/documentPages");
 
 function getUserId(req) {
@@ -315,6 +318,13 @@ exports.getFeed = async (req, res) => {
       ];
     }
 
+    // Paging: ?limit= (1 to 50, default 50) and ?before= (the nextCursor of the previous page).
+    const limit = parseLimit(req.query.limit);
+    const cursor = decodeCursor(req.query.before);
+    if (cursor && cursor.error) {
+      return res.status(400).json({ status: "error", message: cursor.error });
+    }
+
     const hiddenPosts = await HiddenPost.find({ userId })
       .select("postId")
       .lean();
@@ -333,10 +343,18 @@ exports.getFeed = async (req, res) => {
       feedFilter.userId = { $nin: blockedAuthors };
     }
 
-    const posts = await Post.find(feedFilter)
-      .sort({ createdAt: -1 })
-      .limit(50)
+    if (cursor) {
+      feedFilter.$and = [...(feedFilter.$and || []), olderThan(cursor, (id) => new mongoose.Types.ObjectId(id))];
+    }
+
+    // One extra row tells us whether there is another page.
+    const fetched = await Post.find(feedFilter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(limit + 1)
       .lean();
+    const hasMore = fetched.length > limit;
+    const posts = hasMore ? fetched.slice(0, limit) : fetched;
+    const nextCursor = hasMore ? encodeCursor(posts[posts.length - 1]) : null;
 
     const postsWithAuthors = await attachAuthorNames(posts);
 
@@ -356,6 +374,8 @@ exports.getFeed = async (req, res) => {
     return res.status(200).json({
       status: "success",
       count: postsWithLikeStatus.length,
+      hasMore,
+      nextCursor,
       data: postsWithLikeStatus,
     });
   } catch (error) {
@@ -468,6 +488,64 @@ exports.getPostById = async (req, res) => {
 // Deletion is allowed for the post's original author OR any admin.
 // Everyone else gets a 403, same as before - this just adds the
 // admin bypass that was previously missing entirely.
+/**
+ * PATCH /api/posts/:id/audience
+ * The author changes who a post is for. Only the author, and only for their own ordinary posts (not community
+ * posts, not reshares). Narrowing the audience also removes reshares that would keep showing the post to people
+ * the new audience leaves out (see services/postCleanup.js).
+ */
+exports.updatePostAudience = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = getUserId(req);
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ status: "error", message: "Invalid post id" });
+    }
+    const chosen = normalizeAudience(req.body);
+    if (!chosen.ok) {
+      return res.status(400).json({ status: "error", message: chosen.message });
+    }
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ status: "error", message: "Post not found" });
+    }
+    if (String(post.userId) !== String(userId)) {
+      return res.status(403).json({ status: "error", message: "You can only change the audience of your own posts" });
+    }
+    if (post.communityId) {
+      return res.status(400).json({ status: "error", message: "A community post is for the community's members" });
+    }
+    if (post.reshareOf) {
+      return res.status(400).json({ status: "error", message: "A reshare follows the post it shares" });
+    }
+
+    post.audience = chosen.value.audience;
+    post.audienceUniversityIds = chosen.value.audienceUniversityIds;
+    post.audienceUserIds = chosen.value.audienceUserIds;
+    await post.save();
+
+    const trimmed = await trimResharesForAudience(
+      { Post, Comment, Like, HiddenPost, UserNotification },
+      post,
+      chosen.value.audience
+    );
+
+    return res.status(200).json({
+      status: "success",
+      removedReshares: trimmed.removed,
+      data: {
+        _id: post._id,
+        audience: post.audience,
+        audienceUniversityIds: post.audienceUniversityIds,
+        audienceUserIds: post.audienceUserIds,
+      },
+    });
+  } catch (error) {
+    console.error("Update post audience error:", error);
+    return res.status(500).json({ status: "error", message: "Error changing the audience: " + error.message });
+  }
+};
+
 exports.deletePost = async (req, res) => {
   try {
     const { id } = req.params;
@@ -529,6 +607,9 @@ exports.deletePost = async (req, res) => {
     }
 
     await post.deleteOne();
+
+    // Its comments, likes, reshares, hidden-post rows and notifications go with it.
+    await removePostLeftovers({ Post, Comment, Like, HiddenPost, UserNotification }, post._id);
 
     return res.status(200).json({
       status: "success",

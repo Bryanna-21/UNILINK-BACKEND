@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const UserNotification = require("../models/UserNotification");
+const User = require("../models/User");
+const { attachActors } = require("../services/notificationActors");
 const { normalizeCategory, typeFilter, countsByCategory } = require("../utils/notification.rules");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
@@ -20,7 +22,8 @@ exports.getMyNotifications = async (req, res) => {
     const [notifications, unreadRows] = await Promise.all([
       UserNotification.find({ ...mine, type: typeFilter(category) })
         .sort({ createdAt: -1 })
-        .limit(50),
+        .limit(50)
+        .lean(),
       UserNotification.aggregate([
         { $match: { ...mine, read: false, type: typeFilter("all") } },
         { $group: { _id: "$type", n: { $sum: 1 } } },
@@ -35,7 +38,8 @@ exports.getMyNotifications = async (req, res) => {
       count: notifications.length,
       unreadCount: counts.all,
       counts,
-      data: notifications,
+      // Each row also says who did it, with their profile photo.
+      data: await attachActors(User, notifications),
     });
   } catch (error) {
     res.status(500).json({ status: "error", message: "Error fetching notifications: " + error.message });

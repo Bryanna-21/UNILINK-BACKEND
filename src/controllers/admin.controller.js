@@ -110,7 +110,7 @@ exports.listUsers = async (req, res) => {
 
     const total = await User.countDocuments(query);
     const users = await User.find(query)
-      .select("name email role status universityId createdAt")
+      .select("name email role status universityId avatarUrl createdAt")
       .sort({ createdAt: -1 })
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum);
@@ -140,6 +140,7 @@ exports.listUsers = async (req, res) => {
         role: u.role,
         university: universityById.get(u.universityId) || null,
         status: u.status,
+        avatarUrl: u.avatarUrl || null,
         createdAt: u.createdAt,
       })),
     });
@@ -270,7 +271,7 @@ exports.listAdmins = async (req, res) => {
 
     const total = await User.countDocuments(query);
     const admins = await User.find(query)
-      .select("_id name email role status universityId createdAt")
+      .select("_id name email role status universityId avatarUrl createdAt")
       .skip((page - 1) * limit)
       .limit(parseInt(limit))
       .sort({ createdAt: -1 });
@@ -284,6 +285,7 @@ exports.listAdmins = async (req, res) => {
         role: admin.role,
         status: admin.status,
         universityId: admin.universityId || null,
+        avatarUrl: admin.avatarUrl || null,
         createdAt: admin.createdAt,
       })),
       pagination: {

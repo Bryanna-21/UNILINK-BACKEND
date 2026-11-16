@@ -73,12 +73,14 @@ exports.getDiscussionForCourse = async (req, res) => {
     const posts = await Discussion.find({ courseId: req.params.courseId }).sort({ createdAt: 1 }).lean();
 
     const userIds = [...new Set(posts.map((p) => String(p.userId)))];
-    const users = await User.find({ _id: { $in: userIds } }).select("_id name").lean();
+    const users = await User.find({ _id: { $in: userIds } }).select("_id name avatarUrl").lean();
     const nameById = new Map(users.map((u) => [String(u._id), u.name]));
+    const avatarById = new Map(users.map((u) => [String(u._id), u.avatarUrl || null]));
 
     const withAuthors = posts.map((p) => ({
       ...p,
       authorName: nameById.get(String(p.userId)) || "Unknown user",
+      authorAvatarUrl: avatarById.get(String(p.userId)) || null,
     }));
 
     res.status(200).json({ status: "success", count: withAuthors.length, data: withAuthors });

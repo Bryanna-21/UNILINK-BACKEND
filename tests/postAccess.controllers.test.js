@@ -14,6 +14,7 @@ const HiddenPost = require("../src/models/HiddenPost");
 const Community = require("../src/models/Community");
 const CommunityMembership = require("../src/models/CommunityMembership");
 const communityController = require("../src/controllers/community.controller");
+const UserNotification = require("../src/models/UserNotification");
 const postController = require("../src/controllers/post.controller");
 const followController = require("../src/controllers/follow.controller");
 const profileController = require("../src/controllers/profile.controller");
@@ -263,4 +264,122 @@ test("the older comment routes obey the post's audience too", async () => {
     assert.equal((await call(communityController.addComment, { params: { postId: P_FOLLOWERS }, body: { content: "hi" } })).status, 404);
     assert.equal(w.calls.commentCreated, 0);
   } finally { w.restore(); }
+});
+
+// ---------------------------------------------------------------- paging, audience editing, delete cleanup
+const idOf = (n) => hex(900 + n);
+const feedRows = (n) => Array.from({ length: n }, (_, i) => ({ _id: idOf(n - i), userId: AUTHOR, universityId: U1, communityId: null, content: "p" + i, media: [], createdAt: new Date(10000 - i * 1000) }));
+
+test("feed paging: a full page says there is more and gives the marker; the last page says there is not", async () => {
+  const w = setup();
+  try {
+    Post.find = (f) => { w.calls.postFind.push(f); return chain(feedRows(3)); };
+    const r = await call(postController.getFeed, { query: { limit: "2" } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.data.length, 2);
+    assert.equal(r.body.hasMore, true);
+    assert.equal(r.body.nextCursor, `${new Date(9000).getTime()}_${idOf(2)}`);
+    Post.find = () => chain(feedRows(2));
+    const last = await call(postController.getFeed, { query: { limit: "2" } });
+    assert.equal(last.body.hasMore, false);
+    assert.equal(last.body.nextCursor, null);
+  } finally { w.restore(); }
+});
+
+test("feed paging: the marker becomes an 'older than' condition, and a broken marker is a 400", async () => {
+  const w = setup();
+  try {
+    await call(postController.getFeed, { query: { before: `5000_${idOf(5)}` } });
+    const used = w.calls.postFind.find((f) => f && f.communityId === null);
+    const older = used.$and.find((c) => c.$or && c.$or[0] && c.$or[0].createdAt && c.$or[0].createdAt.$lt);
+    assert.ok(older, "the feed asked only for older posts");
+    assert.equal(older.$or[0].createdAt.$lt.getTime(), 5000);
+    const bad = await call(postController.getFeed, { query: { before: "nonsense" } });
+    assert.equal(bad.status, 400);
+  } finally { w.restore(); }
+});
+
+test("feed paging: with no limit it still returns up to 50, as before", async () => {
+  const w = setup();
+  try {
+    let asked = 0;
+    Post.find = () => { const o = chain([]); o.limit = (n) => { asked = n; return o; }; return o; };
+    await call(postController.getFeed, { query: {} });
+    assert.equal(asked, 51, "50 plus the one extra row that shows whether there is a next page");
+  } finally { w.restore(); }
+});
+
+function audienceWorld(post) {
+  const w = setup();
+  const doc = { ...post, saved: 0, save: async function save() { this.saved += 1; } };
+  Post.findById = () => chain(doc);
+  Post.find = () => chain([]);
+  Post.deleteMany = async () => ({ deletedCount: 0 });
+  return { w, doc };
+}
+
+test("changing a post's audience: only the author, only an ordinary post, only a valid choice", async () => {
+  const { w, doc } = audienceWorld({ _id: P_OWN, userId: ME, universityId: U1, communityId: null, reshareOf: null, audience: "university", audienceUniversityIds: [], audienceUserIds: [] });
+  try {
+    const ok = await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "everyone" } });
+    assert.equal(ok.status, 200);
+    assert.equal(doc.audience, "everyone");
+    assert.equal(doc.saved, 1);
+    assert.equal(ok.body.data.audience, "everyone");
+    const bad = await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "universities" } });
+    assert.equal(bad.status, 400);
+    assert.equal(doc.saved, 1, "nothing was saved for a bad choice");
+    const stranger = await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "everyone" }, as: FAR });
+    assert.equal(stranger.status, 403);
+    const badId = await call(postController.updatePostAudience, { params: { id: "x" }, body: { audience: "everyone" } });
+    assert.equal(badId.status, 400);
+  } finally { w.restore(); }
+});
+
+test("changing the audience of a community post or a reshare is refused", async () => {
+  const club = audienceWorld({ _id: P_OWN, userId: ME, communityId: CLUB, audience: "university" });
+  try {
+    assert.equal((await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "everyone" } })).status, 400);
+  } finally { club.w.restore(); }
+  const reshare = audienceWorld({ _id: P_OWN, userId: ME, communityId: null, reshareOf: P_FAR, audience: "university" });
+  try {
+    assert.equal((await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "everyone" } })).status, 400);
+  } finally { reshare.w.restore(); }
+});
+
+test("narrowing the audience reports how many reshares were removed", async () => {
+  const { w } = audienceWorld({ _id: P_OWN, userId: ME, universityId: U1, communityId: null, reshareOf: null, audience: "everyone", audienceUniversityIds: [], audienceUserIds: [] });
+  try {
+    Post.find = () => chain([{ _id: hex(70) }, { _id: hex(71) }]);
+    let deleted = null;
+    Post.deleteMany = async (f) => { deleted = f; return { deletedCount: 2 }; };
+    const r = await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "followers" } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.removedReshares, 2);
+    assert.ok(deleted._id.$in.length === 2);
+  } finally { w.restore(); }
+});
+
+test("deleting a post also clears what hangs off it", async () => {
+  const w = setup();
+  const log = [];
+  const stash = [Comment.deleteMany, Like.deleteMany, HiddenPost.deleteMany, UserNotification.deleteMany, Post.deleteMany];
+  try {
+    const doc = { _id: P_OWN, userId: ME, media: [], deleteOne: async () => log.push("post") };
+    Post.findById = () => chain(doc);
+    Post.find = () => chain([{ _id: hex(80) }]);
+    Comment.deleteMany = async () => { log.push("comments"); return {}; };
+    Like.deleteMany = async () => { log.push("likes"); return {}; };
+    HiddenPost.deleteMany = async () => { log.push("hidden"); return {}; };
+    UserNotification.deleteMany = async () => { log.push("notifications"); return {}; };
+    Post.deleteMany = async () => { log.push("reshares"); return {}; };
+    const r = await call(postController.deletePost, { params: { id: P_OWN } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(log, ["post", "comments", "likes", "hidden", "notifications", "reshares"]);
+    const stranger = await call(postController.deletePost, { params: { id: P_OWN }, as: FAR });
+    assert.equal(stranger.status, 403);
+  } finally {
+    [Comment.deleteMany, Like.deleteMany, HiddenPost.deleteMany, UserNotification.deleteMany, Post.deleteMany] = stash;
+    w.restore();
+  }
 });

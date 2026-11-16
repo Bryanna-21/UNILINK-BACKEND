@@ -33,6 +33,10 @@ const postSchema = new mongoose.Schema({
     default: "university",
   },
   audienceUniversityIds: { type: [String], default: [] },
+
+  // Starter posts made by scripts/seedPosts.js: isSeed marks them, seedKey makes a re-run skip what exists.
+  isSeed: { type: Boolean, default: false },
+  seedKey: { type: String, default: null },
   audienceUserIds: { type: [String], default: [] },
 
   // When present, this post is a reshare of another post.

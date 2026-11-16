@@ -60,6 +60,7 @@ router.get("/user/:userId", auth, ctrl.getPostsByUser);
 router.get("/:id", auth, ctrl.getPostById);
 
 // Delete a specific post
+router.patch("/:id/audience", auth, ctrl.updatePostAudience);
 router.delete("/:id", auth, ctrl.deletePost);
 
 module.exports = router;
