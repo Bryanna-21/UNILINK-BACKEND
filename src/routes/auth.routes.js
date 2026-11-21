@@ -4,9 +4,12 @@ const jwt = require("jsonwebtoken");
 const bcryptjs = require("bcryptjs");
 const User = require("../models/User");
 const authMiddleware = require("../middleware/auth.middleware");
-const { createOtp, verifyOtp, sendOtpEmail } = require("../utils/otp.util");
+const { createOtp, verifyOtp, sendOtpEmail, sendNoticeEmail } = require("../utils/otp.util");
 const peopleService = require("../services/people.service");
-const { resolveJwtExpiry } = require("../utils/tokenExpiry.rules");
+const { resolveJwtExpiryForRole } = require("../utils/tokenExpiry.rules");
+const { checkPassword } = require("../utils/passwordPolicy");
+const { logoutEverywhere } = require("../services/sessionService");
+const { notifyPasswordChanged } = require("../services/securityNotice");
 const { authLimits } = require("../middleware/rateLimit.middleware");
 const { isObjectIdString, isOtpCode } = require("../utils/authInput");
 
@@ -35,7 +38,8 @@ const generateToken = (user) => {
     },
     process.env.JWT_SECRET,
     // Was a fixed "24h", which signed students out about once a day. JWT_EXPIRES_IN overrides; default 30 days.
-    { expiresIn: resolveJwtExpiry(process.env.JWT_EXPIRES_IN) }
+    // Staff (admin, superadmin) get a shorter session; everyone else JWT_EXPIRES_IN.
+    { expiresIn: resolveJwtExpiryForRole(user.role, process.env.JWT_EXPIRES_IN, process.env.ADMIN_JWT_EXPIRES_IN) }
   );
 };
 
@@ -226,11 +230,10 @@ router.post("/register", authLimits.register, async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
-      return res.status(400).json({
-        status: "error",
-        message: "Password must be at least 6 characters long",
-      });
+    {
+      // At least 8 characters, and not a common, patterned or personal password (utils/passwordPolicy.js).
+      const policy = checkPassword(password, { email, name });
+      if (!policy.ok) return res.status(400).json({ status: "error", message: policy.message });
     }
 
     if (!universityId) {
@@ -561,11 +564,9 @@ router.post("/request-password-change", authMiddleware, authLimits.passwordChang
       return res.status(400).json({ status: "error", message: "New passwords do not match" });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        status: "error",
-        message: "New password must be at least 6 characters long",
-      });
+    {
+      const policy = checkPassword(newPassword, { email: req.user && req.user.email });
+      if (!policy.ok) return res.status(400).json({ status: "error", message: policy.message });
     }
 
     const user = await User.findById(req.user.id);
@@ -638,9 +639,15 @@ router.post("/confirm-password-change", authMiddleware, authLimits.passwordChang
 
     user.password = user.pendingPasswordHash;
     user.pendingPasswordHash = undefined;
+    // A changed password ends every session, including this one (the app signs the person out and they sign in with
+    // the new password). Before, a stolen session survived a password change.
+    user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
 
-    res.status(200).json({ status: "success", message: "Password changed successfully." });
+    // Tell the owner by email (best effort), so a change they did not make cannot go unnoticed.
+    notifyPasswordChanged({ user, send: sendNoticeEmail });
+
+    res.status(200).json({ status: "success", message: "Password changed. Please sign in again with your new password.", signedOut: true });
   } catch (error) {
     res.status(500).json({
       status: "error",
@@ -656,6 +663,17 @@ router.post("/confirm-password-change", authMiddleware, authLimits.passwordChang
 // accounts. If the email does belong to an account, an OTP is sent;
 // if not, nothing happens, but the client sees the same success
 // message regardless.
+// Sign out of every device: raises the account's tokenVersion, so every token issued before now is refused.
+router.post("/logout-all", authMiddleware, authLimits.passwordChange, async (req, res) => {
+  try {
+    const result = await logoutEverywhere({ User }, req.user.id);
+    if (!result.ok) return res.status(404).json({ status: "error", message: "Account not found" });
+    return res.status(200).json({ status: "success", message: "You have been signed out of all devices." });
+  } catch (error) {
+    return res.status(500).json({ status: "error", message: "Error signing out: " + error.message });
+  }
+});
+
 router.post("/forgot-password", authLimits.sendCodeIp, authLimits.sendCode, async (req, res) => {
   try {
     const { email } = req.body;
@@ -721,11 +739,9 @@ router.post("/reset-password", authLimits.resetFlood, authLimits.resetPassword, 
       return res.status(400).json({ status: "error", message: "New passwords do not match" });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        status: "error",
-        message: "New password must be at least 6 characters long",
-      });
+    {
+      const policy = checkPassword(newPassword, { email });
+      if (!policy.ok) return res.status(400).json({ status: "error", message: policy.message });
     }
 
     const user = await User.findOne({ email });
@@ -744,6 +760,7 @@ router.post("/reset-password", authLimits.resetFlood, authLimits.resetPassword, 
     user.password = await bcryptjs.hash(newPassword, 10);
     user.tokenVersion = (user.tokenVersion || 0) + 1;
     await user.save();
+    notifyPasswordChanged({ user, send: sendNoticeEmail });
 
     res.status(200).json({
       status: "success",

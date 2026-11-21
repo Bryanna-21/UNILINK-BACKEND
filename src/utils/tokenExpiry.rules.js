@@ -29,4 +29,18 @@ function resolveJwtExpiry(raw) {
   return String(raw).trim().toLowerCase().replace(/\s+/g, "");
 }
 
-module.exports = { resolveJwtExpiry, DEFAULT_EXPIRY: DEFAULT };
+// Staff accounts (admin, superadmin) can suspend people, close accounts and read reports, so their sessions are
+// shorter: 7 days by default (ADMIN_JWT_EXPIRES_IN can set it between 1 hour and 30 days). Students keep JWT_EXPIRES_IN.
+const STAFF_ROLES = new Set(["admin", "superadmin"]);
+const ADMIN_DEFAULT = "7d";
+const ADMIN_MAX_SECONDS = 30 * 86400;
+
+function resolveJwtExpiryForRole(role, raw, adminRaw) {
+  const base = resolveJwtExpiry(raw);
+  if (!STAFF_ROLES.has(role)) return base;
+  const adminSeconds = toSeconds(adminRaw);
+  const admin = adminSeconds !== null && adminSeconds >= MIN_SECONDS && adminSeconds <= ADMIN_MAX_SECONDS ? String(adminRaw).trim().toLowerCase().replace(/\s+/g, "") : ADMIN_DEFAULT;
+  return toSeconds(base) <= toSeconds(admin) ? base : admin;
+}
+
+module.exports = { resolveJwtExpiryForRole, resolveJwtExpiry, DEFAULT_EXPIRY: DEFAULT };

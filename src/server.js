@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+// Refuse to start in production with a missing or publicly known JWT secret (utils/startupChecks.js).
+require("./utils/startupChecks").assertSecureStartup(process.env);
+
 const http = require("http");
 const app = require("./app");
 const mongoose = require("mongoose");

@@ -1,4 +1,5 @@
 const router = require("express").Router();
+const { contentLimits } = require("../middleware/rateLimit.middleware");
 
 const ctrl = require("../controllers/post.controller");
 const auth = require("../middleware/auth.middleware");
@@ -13,20 +14,20 @@ const { uploadPostMedia } = require("../middleware/upload.middleware");
 router.get("/", auth, ctrl.getFeed);
 
 // Create a post
-router.post("/", auth, requireFeature("posting"), uploadPostMedia, ctrl.createPost);
+router.post("/", auth, contentLimits.createPost, requireFeature("posting"), uploadPostMedia, ctrl.createPost);
 
 // ============================================================
 // POST ACTIONS
 // ============================================================
 
 // Like / unlike a post
-router.post("/like/:id", auth, ctrl.likePost);
+router.post("/like/:id", auth, contentLimits.like, ctrl.likePost);
 
 // Profile content
 router.get("/liked", auth, ctrl.getLikedPosts);
 router.get("/hidden", auth, ctrl.getHiddenPosts);
 
-router.post("/reshare/:id", auth, ctrl.resharePost);
+router.post("/reshare/:id", auth, contentLimits.reshare, ctrl.resharePost);
 router.delete("/reshare/:id", auth, ctrl.deleteReshare);
 router.get("/user/:userId/reshares", auth, ctrl.getResharesByUser);
 
@@ -36,14 +37,14 @@ router.delete("/hidden/:id", auth, ctrl.unhidePost);
 // Comments — new backend work, the Comment model existed but had no
 // routes at all.
 router.get("/:id/comments", auth, ctrl.getComments);
-router.post("/:id/comments", auth, requireFeature("commenting"), ctrl.addComment);
+router.post("/:id/comments", auth, contentLimits.comment, requireFeature("commenting"), ctrl.addComment);
 
 // ============================================================
 // BACKWARDS-COMPATIBLE ALIASES
 // ============================================================
 
 // Legacy create endpoint
-router.post("/create", auth, requireFeature("posting"), uploadPostMedia, ctrl.createPost);
+router.post("/create", auth, contentLimits.createPost, requireFeature("posting"), uploadPostMedia, ctrl.createPost);
 
 // Legacy feed endpoint
 router.get("/feed", auth, ctrl.getFeed);

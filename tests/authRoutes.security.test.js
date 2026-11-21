@@ -135,3 +135,23 @@ test("an operator in a query string is refused on any route", async () => {
   const res = await quiet(() => fetch(`${base}/api/posts/feed?q[$ne]=x`, { headers: { "X-Forwarded-For": nextIp() }, signal: AbortSignal.timeout(3000) }));
   assert.equal(res.status, 400);
 });
+
+test("a weak NEW password is refused at registration with a message that says what to do, before any database work", async () => {
+  const base = { name: "Amina Wanjiru", email: "amina@uni.ac.ke", universityId: "64b0000000000000000000a1" };
+  for (const [password, pattern] of [["short1", /at least 8/], ["12345678", /numbers/], ["password123", /common/], ["amina@uni1", /email/]]) {
+    const r = await quiet(() => post("/api/auth/register", { ...base, password, confirmPassword: password }));
+    assert.equal(r.status, 400, password);
+    assert.match(r.json.message, pattern, password);
+  }
+});
+
+test("a weak new password is refused when resetting too", async () => {
+  const r = await quiet(() => post("/api/auth/reset-password", { email: "amina@uni.ac.ke", code: "123456", newPassword: "password1", confirmNewPassword: "password1" }));
+  assert.equal(r.status, 400);
+  assert.match(r.json.message, /common/);
+});
+
+test("signing out of all devices needs a signed-in person", async () => {
+  const r = await quiet(() => post("/api/auth/logout-all", {}));
+  assert.equal(r.status, 401);
+});

@@ -50,6 +50,7 @@ function rateLimit({ name, windowMs, max, keys, message = "Too many attempts. Pl
     return next();
   };
   middleware.limiter = limiter;
+  middleware.limitName = name;
   return middleware;
 }
 
@@ -85,4 +86,20 @@ const authLimits = {
   passwordChange: rateLimit({ name: "pwchange", windowMs: 15 * MIN, max: 8, keys: (req) => [`u:${req.user ? req.user.id : "x"}`], message: "Too many attempts. Please wait 15 minutes and try again." }),
 };
 
-module.exports = { createLimiter, rateLimit, authLimits };
+// Limits on what a SIGNED-IN person can do, so one account cannot flood the app (or run up the SMS bill). The person
+// is the key, so these run after the auth middleware. The numbers are well above normal use.
+const user = (req) => `u:${req.user && (req.user.id || req.user._id) ? req.user.id || req.user._id : "x"}`;
+const contentLimits = {
+  createPost: rateLimit({ name: "createPost", windowMs: HOUR, max: 20, keys: (req) => [user(req)], message: "You are posting very quickly. Please wait a while before posting again." }),
+  comment: rateLimit({ name: "comment", windowMs: 10 * MIN, max: 60, keys: (req) => [user(req)], message: "You are commenting very quickly. Please slow down for a few minutes." }),
+  like: rateLimit({ name: "like", windowMs: 10 * MIN, max: 300, keys: (req) => [user(req)], message: "Too many likes in a short time. Please slow down." }),
+  reshare: rateLimit({ name: "reshare", windowMs: HOUR, max: 30, keys: (req) => [user(req)], message: "You are resharing very quickly. Please wait a while." }),
+  follow: rateLimit({ name: "follow", windowMs: HOUR, max: 120, keys: (req) => [user(req)], message: "You are following people very quickly. Please wait a while." }),
+  message: rateLimit({ name: "message", windowMs: 5 * MIN, max: 120, keys: (req) => [user(req)], message: "You are sending messages very quickly. Please slow down for a few minutes." }),
+  community: rateLimit({ name: "community", windowMs: HOUR, max: 30, keys: (req) => [user(req)], message: "You are creating things very quickly. Please wait a while." }),
+  // An emergency alert must never be blocked by a limit that a real emergency could hit: 10 an hour is far above any
+  // real use and only stops a script sending hundreds of texts at your expense.
+  emergency: rateLimit({ name: "emergency", windowMs: HOUR, max: 10, keys: (req) => [user(req)], message: "Emergency alerts were sent several times in the last hour. If you are still in danger, call the emergency number directly." }),
+};
+
+module.exports = { createLimiter, rateLimit, authLimits, contentLimits };
