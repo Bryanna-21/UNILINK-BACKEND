@@ -1,9 +1,10 @@
 const router = require("express").Router();
+const { contentLimits } = require("../middleware/rateLimit.middleware");
 const ctrl = require("../controllers/emergency.controller");
 const auth = require("../middleware/auth.middleware");
 
 // Student-facing
-router.post("/report", auth, ctrl.reportEmergency);
+router.post("/report", auth, contentLimits.emergency, ctrl.reportEmergency);
 router.get("/my-reports", auth, ctrl.getMyReports);
 
 // Lecturer/admin-facing - authorization computed server-side inside
@@ -20,6 +21,6 @@ router.patch("/reports/:id/escalate", auth, ctrl.escalateReport);
 router.patch("/reports/:id/status", auth, ctrl.updateReportStatus);
 
 router.get("/contacts", auth, ctrl.getContacts);
-router.post("/help", auth, ctrl.requestHelp);
+router.post("/help", auth, contentLimits.emergency, ctrl.requestHelp);
 
 module.exports = router;

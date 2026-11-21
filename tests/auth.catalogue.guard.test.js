@@ -15,6 +15,6 @@ test("/auth/me selects courseId", () => {
   assert.match(src, /\.select\(\s*"name email role universityId campusId bio phone avatarUrl coverUrl username programme yearOfStudy semester onboardingCompletedAt courseId"/);
 });
 test("tokens use the configurable lifetime, not a fixed 24 hours", () => {
-  assert.match(src, /expiresIn:\s*resolveJwtExpiry\(process\.env\.JWT_EXPIRES_IN\)/);
+  assert.match(src, /expiresIn:\s*resolveJwtExpiryForRole\(user\.role,\s*process\.env\.JWT_EXPIRES_IN,\s*process\.env\.ADMIN_JWT_EXPIRES_IN\)/);
   assert.doesNotMatch(src, /expiresIn:\s*"24h"/);
 });

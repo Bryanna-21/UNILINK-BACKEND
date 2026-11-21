@@ -107,4 +107,15 @@ async function sendOtpEmail(toEmail, code, purpose) {
   }
 }
 
-module.exports = { createOtp, verifyOtp, sendOtpEmail, OTP_TTL_MINUTES };
+// A plain notice to the account owner (no code), such as "your password was changed". The caller treats a failure
+// as non-fatal (services/securityNotice.js).
+async function sendNoticeEmail(toEmail, subject, body) {
+  const message = new SibApiV3Sdk.SendSmtpEmail();
+  message.subject = subject;
+  message.sender = SENDER;
+  message.to = [{ email: toEmail }];
+  message.textContent = body;
+  await transactionalEmailsApi.sendTransacEmail(message);
+}
+
+module.exports = { createOtp, verifyOtp, sendOtpEmail, sendNoticeEmail, OTP_TTL_MINUTES };

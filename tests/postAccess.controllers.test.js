@@ -353,10 +353,16 @@ test("narrowing the audience reports how many reshares were removed", async () =
     Post.find = () => chain([{ _id: hex(70) }, { _id: hex(71) }]);
     let deleted = null;
     Post.deleteMany = async (f) => { deleted = f; return { deletedCount: 2 }; };
-    const r = await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "followers" } });
-    assert.equal(r.status, 200);
-    assert.equal(r.body.removedReshares, 2);
-    assert.ok(deleted._id.$in.length === 2);
+    // The cleanup also clears comments, likes, hidden rows and notifications of those reshares: stub them, or each
+    // one waits for a database that is not there (this test used to take 40 seconds).
+    const stash = [Comment.deleteMany, Like.deleteMany, HiddenPost.deleteMany, UserNotification.deleteMany];
+    Comment.deleteMany = async () => ({}); Like.deleteMany = async () => ({}); HiddenPost.deleteMany = async () => ({}); UserNotification.deleteMany = async () => ({});
+    try {
+      const r = await call(postController.updatePostAudience, { params: { id: P_OWN }, body: { audience: "followers" } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.removedReshares, 2);
+      assert.ok(deleted._id.$in.length === 2);
+    } finally { [Comment.deleteMany, Like.deleteMany, HiddenPost.deleteMany, UserNotification.deleteMany] = stash; }
   } finally { w.restore(); }
 });
 
