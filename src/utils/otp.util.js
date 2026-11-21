@@ -2,9 +2,6 @@ const SibApiV3Sdk = require("sib-api-v3-sdk");
 const crypto = require("crypto");
 const OtpCode = require("../models/OtpCode");
 
-const OTP_LENGTH = 6;
-const OTP_TTL_MINUTES = 10;
-
 // Brevo client setup. Unlike the earlier Resend integration, Brevo's
 // free tier allows sending to ANY recipient once a sender is verified -
 // no domain required, no per-recipient sandbox restriction. The
@@ -27,49 +24,10 @@ const SENDER = {
   email: process.env.BREVO_SENDER_EMAIL,
 };
 
-// crypto.randomInt is cryptographically secure, unlike Math.random -
-// worth using here since this is an auth-security code, not a
-// cosmetic random value.
-function generateOtpDigits() {
-  return crypto.randomInt(0, 10 ** OTP_LENGTH).toString().padStart(OTP_LENGTH, "0");
-}
-
-// Creates and persists a new OTP for a user/purpose, invalidating any
-// prior unused codes for that same user+purpose first - otherwise an
-// old code from a previous request could still be sitting in the
-// collection and technically valid until its own expiry, which would
-// mean two live codes for the same request with no way for the user
-// to know which one is current.
-async function createOtp(userId, purpose) {
-  await OtpCode.updateMany({ userId, purpose, used: false }, { $set: { used: true } });
-
-  const code = generateOtpDigits();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
-
-  await OtpCode.create({ userId, code, purpose, expiresAt });
-  return code;
-}
-
-// Checks a submitted code against the most recent unused, unexpired
-// code for this user/purpose. Marks it used on success so it can't be
-// replayed. Returns true/false rather than throwing, since "wrong
-// code" is an expected, common outcome here, not an exceptional one.
-async function verifyOtp(userId, purpose, submittedCode) {
-  const record = await OtpCode.findOne({
-    userId,
-    purpose,
-    used: false,
-    expiresAt: { $gt: new Date() },
-  }).sort({ createdAt: -1 });
-
-  if (!record || record.code !== submittedCode) {
-    return false;
-  }
-
-  record.used = true;
-  await record.save();
-  return true;
-}
+// Creating and checking codes lives in services/otp.core.js (hashed at rest, five wrong tries burn a code,
+// constant-time compare, only well-formed input ever reaches a query). This file sends the email.
+const { makeOtpCore, OTP_LENGTH, OTP_TTL_MINUTES } = require("../services/otp.core");
+const { createOtp, verifyOtp } = makeOtpCore({ OtpCode });
 
 // Purpose -> (subject, body-intro) mapping. Each purpose gets wording
 // specific to what triggered it, so a user who didn't request a

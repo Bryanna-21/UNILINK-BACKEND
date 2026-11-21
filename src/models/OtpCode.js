@@ -6,12 +6,15 @@ const mongoose = require("mongoose");
 // accepted to complete a different one.
 const otpCodeSchema = new mongoose.Schema({
   userId: { type: String, required: true },
+  // A keyed hash of the code (older rows hold the 6 digits and are still accepted until they expire).
   code: { type: String, required: true },
   purpose: {
     type: String,
     enum: ["verify_signup", "login_2fa", "password_change", "new_device_login", "password_reset"],
     required: true,
   },
+  // Wrong guesses so far. At five the code is burned (services/otp.core.js).
+  attempts: { type: Number, default: 0 },
   used: { type: Boolean, default: false },
   expiresAt: { type: Date, required: true },
   createdAt: { type: Date, default: Date.now },

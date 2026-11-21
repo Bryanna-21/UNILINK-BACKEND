@@ -7,6 +7,8 @@ const authMiddleware = require("../middleware/auth.middleware");
 const { createOtp, verifyOtp, sendOtpEmail } = require("../utils/otp.util");
 const peopleService = require("../services/people.service");
 const { resolveJwtExpiry } = require("../utils/tokenExpiry.rules");
+const { authLimits } = require("../middleware/rateLimit.middleware");
+const { isObjectIdString, isOtpCode } = require("../utils/authInput");
 
 // Kept as the single source of truth for valid roles across the app
 // (used by scripts/seedAdmin.js). Not used to trust a client-supplied
@@ -195,9 +197,20 @@ router.get("/universities/:universityId/campuses", async (req, res) => {
   }
 });
 
-router.post("/register", async (req, res) => {
+router.post("/register", authLimits.register, async (req, res) => {
   try {
     const { name, email, password, confirmPassword, universityId, campusId, username } = req.body;
+
+    // Every value must be plain text (never an object a database would read as a query).
+    const none = (v) => v === undefined || v === null || v === "";
+    if (
+      [name, email, password, confirmPassword].some((v) => v !== undefined && typeof v !== "string") ||
+      (!none(universityId) && !isObjectIdString(universityId)) ||
+      (!none(campusId) && !isObjectIdString(campusId)) ||
+      (!none(username) && typeof username !== "string")
+    ) {
+      return res.status(400).json({ status: "error", message: "Invalid request." });
+    }
 
     if (!name || !email || !password || !confirmPassword) {
       return res.status(400).json({
@@ -313,11 +326,16 @@ router.post("/register", async (req, res) => {
 // Confirms a signup verification code. On success, marks the account
 // verified — this is the point at which the account first becomes
 // able to log in at all.
-router.post("/verify-otp", async (req, res) => {
+router.post("/verify-otp", authLimits.verifyFlood, authLimits.verifyCode, async (req, res) => {
   try {
     const { userId, code } = req.body;
     if (!userId || !code) {
       return res.status(400).json({ status: "error", message: "userId and code are required" });
+    }
+    // Only a 24-character id and a 6-digit code, both as plain text, can ever be real. Anything else (an object
+    // such as {"$ne": null} included) is refused before it reaches a query.
+    if (!isObjectIdString(userId) || !isOtpCode(code)) {
+      return res.status(400).json({ status: "error", message: "Invalid or expired code" });
     }
 
     const user = await User.findById(userId);
@@ -352,11 +370,14 @@ router.post("/verify-otp", async (req, res) => {
 // that didn't arrive. Deliberately does not reveal whether the userId
 // exists in a different state (e.g. already verified) beyond what's
 // needed for the client to react correctly.
-router.post("/resend-otp", async (req, res) => {
+router.post("/resend-otp", authLimits.sendCodeIp, authLimits.sendCode, async (req, res) => {
   try {
     const { userId } = req.body;
     if (!userId) {
       return res.status(400).json({ status: "error", message: "userId is required" });
+    }
+    if (!isObjectIdString(userId)) {
+      return res.status(400).json({ status: "error", message: "Invalid request." });
     }
 
     const user = await User.findById(userId);
@@ -385,7 +406,7 @@ router.post("/resend-otp", async (req, res) => {
 });
 
 // Login route
-router.post("/login", async (req, res) => {
+router.post("/login", authLimits.loginFlood, authLimits.login, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -394,6 +415,9 @@ router.post("/login", async (req, res) => {
         status: "error",
         message: "Please provide email and password",
       });
+    }
+    if (typeof email !== "string" || typeof password !== "string") {
+      return res.status(400).json({ status: "error", message: "Invalid email or password" });
     }
 
     const user = await User.findOne({ email });
@@ -483,11 +507,14 @@ router.post("/login", async (req, res) => {
 
 // Completes a 2FA login: password was already verified in /login,
 // this only checks the emailed code and issues the token.
-router.post("/verify-login-otp", async (req, res) => {
+router.post("/verify-login-otp", authLimits.verifyFlood, authLimits.verifyCode, async (req, res) => {
   try {
     const { userId, code } = req.body;
     if (!userId || !code) {
       return res.status(400).json({ status: "error", message: "userId and code are required" });
+    }
+    if (!isObjectIdString(userId) || !isOtpCode(code)) {
+      return res.status(400).json({ status: "error", message: "Invalid or expired code" });
     }
 
     const user = await User.findById(userId);
@@ -519,7 +546,7 @@ router.post("/verify-login-otp", async (req, res) => {
 // being used by someone else to silently change the password. On
 // success, sends an OTP to the account's own email; the actual
 // password is NOT changed until /confirm-password-change verifies it.
-router.post("/request-password-change", authMiddleware, async (req, res) => {
+router.post("/request-password-change", authMiddleware, authLimits.passwordChange, async (req, res) => {
   try {
     const { currentPassword, newPassword, confirmNewPassword } = req.body;
 
@@ -585,7 +612,7 @@ router.post("/request-password-change", authMiddleware, async (req, res) => {
 // pendingPasswordHash (set in /request-password-change) to the
 // user's actual password. Requires the same authenticated session
 // that started the request.
-router.post("/confirm-password-change", authMiddleware, async (req, res) => {
+router.post("/confirm-password-change", authMiddleware, authLimits.passwordChange, async (req, res) => {
   try {
     const { code } = req.body;
     if (!code) {
@@ -629,12 +656,15 @@ router.post("/confirm-password-change", authMiddleware, async (req, res) => {
 // accounts. If the email does belong to an account, an OTP is sent;
 // if not, nothing happens, but the client sees the same success
 // message regardless.
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", authLimits.sendCodeIp, authLimits.sendCode, async (req, res) => {
   try {
     const { email } = req.body;
 
     if (!email) {
       return res.status(400).json({ status: "error", message: "Email is required" });
+    }
+    if (typeof email !== "string") {
+      return res.status(400).json({ status: "error", message: "Invalid request." });
     }
 
     const genericResponse = {
@@ -673,7 +703,7 @@ router.post("/forgot-password", async (req, res) => {
 // is the one password-change flow that should log out other
 // sessions, since it exists specifically to recover from a
 // potentially-compromised or lost-access account.
-router.post("/reset-password", async (req, res) => {
+router.post("/reset-password", authLimits.resetFlood, authLimits.resetPassword, async (req, res) => {
   try {
     const { email, code, newPassword, confirmNewPassword } = req.body;
 
@@ -682,6 +712,9 @@ router.post("/reset-password", async (req, res) => {
         status: "error",
         message: "email, code, newPassword, and confirmNewPassword are required",
       });
+    }
+    if ([email, code, newPassword, confirmNewPassword].some((v) => typeof v !== "string")) {
+      return res.status(400).json({ status: "error", message: "Invalid request." });
     }
 
     if (newPassword !== confirmNewPassword) {
